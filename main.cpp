@@ -4,17 +4,24 @@
 #include "serialATmega.h"
 /* work smarter */
 #define uchar unsigned char
+#define ushort unsigned short
 #define uint unsigned int
 /* colors */
 #define red   0xF800
 #define green 0x07E0
 #define blue  0x001f
+#define black 0x0000
+/* dimensions */
+#define min_x 0
+#define min_y 0
+#define max_x 239
+#define max_y 319
 
 
 //TODO: declare variables for cross-task communication
 
 /* You have 5 tasks to implement for this lab */
-#define NUM_TASKS 0
+#define NUM_TASKS 1
 
 
 //Task struct for concurrent synchSMs implmentations
@@ -27,7 +34,7 @@ typedef struct _task{
 
 
 
-const unsigned long GCD_PERIOD = /* TODO: Calulate GCD of tasks */ 1000;
+const unsigned long GCD_PERIOD = /* TODO: Calulate GCD of tasks */ 1;
 
 task tasks[NUM_TASKS]; // declared task array with 5 tasks
 
@@ -41,6 +48,14 @@ void TimerISR() {
 	}
 }
 
+typedef enum dir {up,down};
+typedef struct laser_struct{
+    ushort x0, y0, y1;
+    ushort dead = 1;
+    uint color;
+    dir ldir;
+};
+
 void sendcmd(uchar index);
 void write(uchar data);
 void senddata(uint data);
@@ -48,8 +63,18 @@ void setcol(uint start, uint end);
 void setpage(uint start, uint end);
 void fillscr(void);
 void lcdinit(void);
-void setpx(uint x, uint y, uint color);
+uchar setpx(uint x, uint y, uint color);
+int  tick_lcd(int state);
+uchar move_laser(laser_struct* laser);
+void mklaser(ushort x, ushort y, dir laser_dir, uint color);
 
+typedef enum lcd_state{
+    update
+};
+
+const uchar LSR_MAX = 20;
+uchar LSR_CNT = 0;
+laser_struct* lasers[LSR_MAX];
 
 int main(void) {
   /*
@@ -60,11 +85,31 @@ int main(void) {
     DDRD = 0b11110000; PORTD = ~0b11110000;
     DDRB = 0b00101000; PORTB = ~0b00101000;
     lcdinit();
-    setpx(100,100,red);
+
+    // mklaser(110, 10,down,green);
+    // mklaser(100,300,up,blue);
+    // mklaser(80,300,up,red);
+
+
+
+    tasks[0].period = 10;
+    tasks[0].state = update;
+    tasks[0].elapsedTime = 0;
+    tasks[0].TickFct = &tick_lcd;
 
     TimerSet(GCD_PERIOD);
     TimerOn();
-    while (1) {}
+    uchar i = 0;
+    while (1) {
+
+        mklaser(110, 10,down,green);
+        mklaser(100,300,up,blue);
+        mklaser(200, 10,down,red);
+        mklaser(180,300,up,green);
+        mklaser(80,300,up,red);
+        mklaser(20,300,up,blue);
+        _delay_ms(500);
+    }
 
     return 0;
 }
@@ -189,9 +234,79 @@ void lcdinit(void)
 	fillscr();
 }
 
-void setpx(uint x, uint y, uint color){
-    setcol(x,x);
-    setpage(y,y);
-    sendcmd(0x2C);
-    senddata(color);
+int tick_lcd(int state){
+    // update laser positions
+    for (uchar i = 0; i < LSR_CNT; i++){
+        if (lasers[i]->dead != 1){ //laser is not dead
+            move_laser(lasers[i]);
+        }
+    }
+    return state;
+}
+
+uchar setpx(uint x, uint y, uint color){
+    if (x > 0 && x <= max_x && y > 0 && y <= max_y) {
+        setcol(x,x);
+        setpage(y,y);
+        sendcmd(0x2C);
+        senddata(color);
+        return 0;
+    }
+    return 1;
+}
+
+
+void mklaser(ushort x, ushort y, dir laser_dir, uint color){
+    laser_struct* laser = new laser_struct;
+    laser->ldir = laser_dir;
+    laser->y0 = y;
+    laser->y1 = y + 10;
+    laser->x0 = x;
+    laser->color = color;
+    laser->dead = 0;
+    for (ushort i = laser->y0; i <= laser->y1; i++){
+        setpx(x, i, color);
+    }
+
+    for (uchar i = 0; i <= LSR_CNT; i++){
+        if (lasers[i] == nullptr) {
+            lasers[i] = laser;
+            if (LSR_CNT < LSR_MAX) LSR_CNT+= 1;
+            break;
+        }
+        if (lasers[i]->dead == 1){
+            delete lasers[i];
+            lasers[i] = laser;
+            if (LSR_CNT < LSR_MAX) LSR_CNT+= 1;
+            break;
+        }
+
+    }
+}
+
+uchar move_laser(laser_struct* laser){
+    switch (laser->ldir){
+        case down:
+            if (setpx(laser->x0, laser->y0, black) == 1){
+                laser->dead = 1;
+                return 0;
+            }
+            laser->y0 += 1;
+            laser->y1 += 1; 
+            setpx(laser->x0, laser->y1, laser->color);
+
+            break;
+        case up:
+
+            if (setpx(laser->x0, laser->y1, black) == 1){
+                laser->dead = 1;
+                return 0;
+            }
+            laser->y1 -= 1;
+            laser->y0 -= 1;
+            setpx(laser->x0, laser->y0, laser->color);
+
+            break;
+    }
+    return 0;
 }
