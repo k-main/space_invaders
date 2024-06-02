@@ -1,15 +1,15 @@
-
 #include "spiAVR.h"
 #include "timerISR.h"
 #include "serialATmega.h"
 #include "periph.h"
+#include "helper.h"
 /* work smarter */
 #define uchar unsigned char
 #define ushort unsigned short
 #define uint unsigned int
 #define player_w 20
 #define player_h 10
-#define player_step 3
+#define player_step 2
 /* colors */
 #define red   0xF800
 #define green 0x07E0
@@ -34,7 +34,6 @@ typedef struct _task{
 	unsigned long elapsedTime; 	//Time elapsed since last task tick
 	int (*TickFct)(int); 		//Task tick function
 } task;
-
 
 
 const unsigned long GCD_PERIOD = /* TODO: Calulate GCD of tasks */ 1;
@@ -64,26 +63,29 @@ enum btn_state{
 
 enum dir {up,down,left,right};
 struct laser_struct{
-    ushort x0, y0, y1, dead;
+    ushort x0, y0, y1, dead, pending_coll;
     uint color;
     dir ldir;
+    void erase(void);
 };
 
-struct mask{
-    ushort x0, y0, x1, y1;
-    uchar width;
-    uint color;
-};
-
-struct entity{
-    /* entity is centered at x0, y0 */
+struct player_entity{ 
     dir fire_dir;
     ushort fire_pos;
     ushort gunx0, gunx1, guny0, guny1;
     ushort x0, x1, y0, y1;
     uint color, laser_color;
     ushort i = 0;
-    mask render_mask[];
+};
+
+struct hitbox_ss {
+    uchar x0, x1;
+    ushort y0, y1;
+    uchar hit;
+};
+struct static_structure { // yikes
+    ushort x0, y0, x1, y1;
+    hitbox_ss hitbox[15];
 };
 
 uchar mv_l = 0, mv_r = 0, fire_req = 0, fire_ack;
@@ -95,35 +97,46 @@ void setcol(uint start, uint end);
 void setpage(uint start, uint end);
 void fillscr(void);
 void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
+void drawcirc(ushort x, ushort y, ushort r, uint color);
 void lcdinit(void);
 void mklaser(ushort x, ushort y, dir laser_dir, uint color);
 void renderplayer(ushort x, ushort y, uint color, uint laser_color);
 void mvplayer(uchar step_amt, dir direction);
-// void mkentity(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
+void drawline(ushort x, ushort y, ushort len, uint color);
 uchar setpx(ushort x, ushort y, uint color);
-uchar move_laser(laser_struct* laser);
+uchar mvlaser(laser_struct* laser);
 int tick_lasers(int state);
 int tick_mv(int state);
 int tick_fire(int state);
 int tick_player(int state);
+int tick_barriers(int state);
+static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
 
-entity player;
-const uchar LSR_MAX = 20;
+player_entity player;
+const uchar LSR_MAX = 10;
 uchar LSR_CNT = 0;
 laser_struct* lasers[LSR_MAX];
+
+static_structure barriers[4];
+uchar barrier_num;
+uchar hitbox_num;
 
 int main(void) {
   /*
   To initialize a pin as an output, you must set its DDR value as ‘1’ and then set its PORT value as a ‘0’. 
   To initialize a pin as an input, you do the opposite: you must set its DDR value as ‘0’ and its PORT value as a ‘1’.
   */
-    serial_init(9600);
     ADC_init();
     DDRD = 0b11110000; PORTD = ~0b11110000;
     DDRB = 0b00101000; PORTB = ~0b00101111;
+    serial_init(9600);
+    /* initialization */
     lcdinit();
-    // fillscr(100, 120, 300, 310, white);
     renderplayer(105, 300, white, cyan);
+    barriers[0] = mkstruct(15, 45, 260, 280);
+    barriers[1] = mkstruct(75, 105, 260, 280);
+    barriers[2] = mkstruct(135, 165, 260, 280);
+    barriers[3] = mkstruct(195, 225, 260, 280);
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -186,14 +199,14 @@ void senddata(uint data)
 
 void setcol(uint start,uint end)
 {
-    sendcmd(0x2A);                                                      /* Column Command address       */
+    sendcmd(0x2A);
     senddata(start);
     senddata(end);
 }
 
 void setpage(uint start,uint end)
 {
-    sendcmd(0x2B);                                                      /* Column Command address       */
+    sendcmd(0x2B);                                    
     senddata(start);
     senddata(end);
 }
@@ -202,8 +215,8 @@ void fillscr(void)
 {
     setcol(0, 239);
     setpage(0, 319);
-    sendcmd(0x2c);                                                  /* start to write to display ra */
-                                                                        /* m                            */
+    sendcmd(0x2c);                                                  
+                                                                      
 
     PORTD |= 0x40; // DC HIGH;
     PORTD &= ~0x20; // CS LOW;
@@ -278,7 +291,7 @@ int tick_lasers(int state){
     // update laser positions
     for (uchar i = 0; i < LSR_CNT; i++){
         if (lasers[i]->dead != 1){ //laser is not dead
-            move_laser(lasers[i]);
+            mvlaser(lasers[i]);
         }
     }
     return state;
@@ -298,12 +311,21 @@ uchar setpx(ushort x, ushort y, uint color){
 void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     y = (y + 10 > max_y) ? max_y - 10 : y;
     laser_struct* laser = new laser_struct;
+
     laser->ldir = laser_dir;
     laser->y0 = y;
     laser->y1 = y + 10;
     laser->x0 = x;
     laser->color = color;
     laser->dead = 0;
+    laser->pending_coll = 0;
+
+    for (int i = 0; i < 4; i++){
+        if (x >= barriers[i].x0 && x <= barriers[i].x1){
+            laser->pending_coll = 1;
+        }
+    }
+
     for (ushort i = laser->y0; i <= laser->y1; i++){
         setpx(x, i, color);
     }
@@ -324,30 +346,65 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     }
 }
 
-uchar move_laser(laser_struct* laser){
+uchar mvlaser(laser_struct* laser){
     switch (laser->ldir){
         case down:
             if (setpx(laser->x0, laser->y0, black) == 1){
                 laser->dead = 1;
-                // mklaser(laser->x0, max_y - 10, up, laser->color);
                 return 1;
             }
             laser->y0 += 1;
-            laser->y1 += 1; 
+            laser->y1 += 1;
             setpx(laser->x0, laser->y1, laser->color);
-
+            
             break;
         case up:
-
+            
             if (setpx(laser->x0, laser->y1, black) == 1){
                 laser->dead = 1;
-                // mklaser(laser->x0, 0, down, laser->color);
                 return 1;
             }
             laser->y1 -= 1;
             laser->y0 -= 1;
             setpx(laser->x0, laser->y0, laser->color);
+            if (laser->pending_coll == 1){
+                if (laser->y0 >= barriers[0].y0 && laser->y0 <= barriers[0].y1){
+                    uchar dmg_rad = 6;
 
+
+                    barrier_num = (map_value(0,barriers[3].x1 +15,0,4,laser->x0));
+                    hitbox_num = (map_value(barriers[barrier_num].x0,barriers[barrier_num].x1,0,5,laser->x0));
+
+
+                        if (laser->y0 > barriers[0].y1 - 6){
+                            if (barriers[barrier_num].hitbox[hitbox_num + 10].hit == 0){
+                                barriers[barrier_num].hitbox[hitbox_num + 10].hit = 1;
+                                drawcirc(laser->x0,laser->y0,dmg_rad,black);
+                                laser->erase();
+                                laser->dead = 1;
+                                return 1;
+                            }
+                        } else if (laser->y0 > barriers[0].y1 - 12){
+                            if (barriers[barrier_num].hitbox[hitbox_num + 5].hit == 0){
+                                barriers[barrier_num].hitbox[hitbox_num + 5].hit = 1;
+                                drawcirc(laser->x0,laser->y0,dmg_rad,black);
+                                laser->erase();
+                                laser->dead = 1;
+                                return 1;
+                            }
+                        } else if (laser->y0 > barriers[0].y1 - 18){
+                            if (barriers[barrier_num].hitbox[hitbox_num].hit == 0){
+                                barriers[barrier_num].hitbox[hitbox_num].hit = 1;
+                                drawcirc(laser->x0,laser->y0,dmg_rad,black);
+                                laser->erase();
+                                laser->dead = 1;
+                                return 1;
+                            } else {
+                                drawcirc(laser->x0, laser->y0,dmg_rad,black);
+                            }
+                        }
+                }
+            }
             break;
     }
     return 0;
@@ -446,6 +503,7 @@ void renderplayer(ushort x0, ushort y0, uint color, uint laser_color){
     player.y1 = y0 + player_h; 
     player.fire_pos = x0 + (player_w / 2);
     player.laser_color = laser_color;
+    player.color = color;
     // for his lil gun
     player.gunx0 = x0 + (player_w / 2) - 2;
     player.gunx1 = player.gunx0 + 4;
@@ -488,4 +546,66 @@ void mvplayer(uchar step_amt, dir direction){
         /*you're not supposed to be in here*/
         break;
     }
+}
+
+void drawline(ushort x0, ushort y0, ushort len, uint color){
+    setcol(x0,x0);
+    setpage(y0,y0 + len);
+    sendcmd(0x2C);
+    for(int i = 0; i < len; i++) senddata(color);
+}
+
+void drawcirc(ushort x0, ushort y0, ushort r, uint color)
+{
+    int x = -r, y = 0, err = 2-2*r, e2;
+    do {
+
+        drawline(x0-x, y0-y, 2*y, color);
+        drawline(x0+x, y0-y, 2*y, color);
+
+        e2 = err;
+        if (e2 <= y) {
+            err += ++y*2+1;
+            if (-x == y && e2 <= x) e2 = 0;
+        }
+        if (e2 > x) err += ++x*2+1;
+    } while (x <= 0);
+
+}
+
+void laser_struct::erase(void){
+    for (ushort i = y0; i <= y1; i++){
+        setpx(x0,i,black);
+    }
+}
+
+static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
+    static_structure structure;
+    structure.x0 = x0;
+    structure.x1 = x1;
+    structure.y0 = y0;
+    structure.y1 = y1;
+    fillscr(x0, x1, y0, y1, white);
+
+    fillscr(x0 + 5, x1 - 5, y1 - 5, y1 + 5, black);
+    fillscr(x0, x0 + 2, y0, y0 + 2, black);
+    fillscr(x1 - 2, x1, y0, y0 + 2, black);
+
+    hitbox_ss hitb;
+    hitb.hit = 0;
+    uchar hitb_i = 0;
+    uchar hb_dx = (x1 - x0) / 5;
+    uchar hb_dy = (y1 - y0) / 3 - 1;
+    for (uchar y = 0; y < 3; y++){
+        hitb.y0 = y0 + y*hb_dy;
+        hitb.y1 = y0 + (y+1)*hb_dy;
+        for (uchar x = 0; x < 5; x++){
+            hitb.x0 = x0 + x*hb_dx;
+            hitb.x1 = x0 + (x+1)*hb_dx;
+            structure.hitbox[hitb_i] = hitb;
+            hitb_i += 1;
+        }
+    }
+
+    return structure;
 }
