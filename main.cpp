@@ -9,7 +9,7 @@
 #define uint unsigned int
 #define player_w 20
 #define player_h 10
-#define player_step 2
+#define player_step 3
 /* colors */
 #define red   0xF800
 #define green 0x07E0
@@ -23,6 +23,8 @@
 #define max_x 239
 #define max_y 319
 
+#define dmg_rad 7
+#define coll_u_t 5
 
 #define NUM_TASKS 4
 
@@ -63,10 +65,13 @@ enum btn_state{
 
 enum dir {up,down,left,right};
 struct laser_struct{
+    uchar barrier_num, hitbox_num;
     ushort x0, y0, y1, dead, pending_coll;
+    uchar u_coll_t;
     uint color;
     dir ldir;
     void erase(void);
+    uchar collision(void);
 };
 
 struct player_entity{ 
@@ -83,7 +88,7 @@ struct hitbox_ss {
     ushort y0, y1;
     uchar hit;
 };
-struct static_structure { // yikes
+struct static_structure { 
     ushort x0, y0, x1, y1;
     hitbox_ss hitbox[15];
 };
@@ -109,7 +114,6 @@ int tick_lasers(int state);
 int tick_mv(int state);
 int tick_fire(int state);
 int tick_player(int state);
-int tick_barriers(int state);
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
 
 player_entity player;
@@ -118,8 +122,8 @@ uchar LSR_CNT = 0;
 laser_struct* lasers[LSR_MAX];
 
 static_structure barriers[4];
-uchar barrier_num;
-uchar hitbox_num;
+// uchar barrier_num, hitbox_num;
+uchar row_num;
 
 int main(void) {
   /*
@@ -133,10 +137,20 @@ int main(void) {
     /* initialization */
     lcdinit();
     renderplayer(105, 300, white, cyan);
-    barriers[0] = mkstruct(15, 45, 260, 280);
-    barriers[1] = mkstruct(75, 105, 260, 280);
-    barriers[2] = mkstruct(135, 165, 260, 280);
-    barriers[3] = mkstruct(195, 225, 260, 280);
+    barriers[0] = mkstruct(15, 45, 260, 284);
+    barriers[1] = mkstruct(75, 105, 260, 284);
+    barriers[2] = mkstruct(135, 165, 260, 284);
+    barriers[3] = mkstruct(195, 225, 260, 284);
+    // hitbox_ss b = barriers[0].hitbox[0];
+    // hitbox_ss b2 = barriers[0].hitbox[6];
+    // hitbox_ss b3 = barriers[0].hitbox[12];
+
+    // fillscr(b.x0, b.x1, b.y0,b.y1,red);
+    // fillscr(b2.x0, b2.x1, b2.y0,b2.y1,red);
+    // fillscr(b3.x0, b3.x1, b3.y0,b3.y1,red);
+
+    // setpx(100,200,red);
+    
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -153,16 +167,20 @@ int main(void) {
     tasks[2].elapsedTime = 1;
     tasks[2].TickFct = &tick_fire;
 
-    tasks[3].period = 20;
+    tasks[3].period = 30;
     tasks[3].state = wait;
     tasks[3].elapsedTime = 1;
     tasks[3].TickFct = &tick_player;
     
+    
     TimerSet(GCD_PERIOD);
     TimerOn();
 
-
     while (1) {
+        // for (uchar i = 0; i < 4; i++){
+        //     mklaser(30,1,down,red);
+        //     _delay_ms(500);
+        // }
     }
 
     return 0;
@@ -319,10 +337,13 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     laser->color = color;
     laser->dead = 0;
     laser->pending_coll = 0;
-
+    laser->u_coll_t = 0;
     for (int i = 0; i < 4; i++){
         if (x >= barriers[i].x0 && x <= barriers[i].x1){
             laser->pending_coll = 1;
+            laser->barrier_num = (map_value(0,barriers[3].x1 +15,0,4,x));
+            laser->hitbox_num = (map_value(barriers[laser->barrier_num].x0,barriers[laser->barrier_num].x1,0,5,x));
+            continue;
         }
     }
 
@@ -346,6 +367,25 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     }
 }
 
+uchar laser_struct::collision(){
+    ushort leading_px = (ldir == down) ? y1 : y0;
+    uchar arr_offst = (ldir == down) ? 1 : 0;
+    char row_coeff = (ldir == down) ? - 1 : 1;
+    // barrier collision
+    if (pending_coll == 1){
+        if (leading_px >= barriers[0].y0 && leading_px <= barriers[0].y1){
+            row_num = map_value(barriers[0].y0, barriers[0].y1 + 1,0,3,leading_px);
+            if (barriers[barrier_num].hitbox[hitbox_num + 10*arr_offst + row_coeff*5*row_num].hit == 0){
+                barriers[barrier_num].hitbox[hitbox_num + 10*arr_offst + row_coeff*5*row_num].hit = 1;
+                drawcirc(x0,leading_px,dmg_rad,black);
+                erase();
+                dead = 1;
+            } else if (row_num == 0) drawcirc(x0,y0,dmg_rad,black);
+        }
+    }
+    return 0;
+}
+
 uchar mvlaser(laser_struct* laser){
     switch (laser->ldir){
         case down:
@@ -356,7 +396,7 @@ uchar mvlaser(laser_struct* laser){
             laser->y0 += 1;
             laser->y1 += 1;
             setpx(laser->x0, laser->y1, laser->color);
-            
+            laser->u_coll_t = (laser->u_coll_t > coll_u_t) ? laser->collision() : laser->u_coll_t + 1;
             break;
         case up:
             
@@ -367,44 +407,7 @@ uchar mvlaser(laser_struct* laser){
             laser->y1 -= 1;
             laser->y0 -= 1;
             setpx(laser->x0, laser->y0, laser->color);
-            if (laser->pending_coll == 1){
-                if (laser->y0 >= barriers[0].y0 && laser->y0 <= barriers[0].y1){
-                    uchar dmg_rad = 6;
-
-
-                    barrier_num = (map_value(0,barriers[3].x1 +15,0,4,laser->x0));
-                    hitbox_num = (map_value(barriers[barrier_num].x0,barriers[barrier_num].x1,0,5,laser->x0));
-
-
-                        if (laser->y0 > barriers[0].y1 - 6){
-                            if (barriers[barrier_num].hitbox[hitbox_num + 10].hit == 0){
-                                barriers[barrier_num].hitbox[hitbox_num + 10].hit = 1;
-                                drawcirc(laser->x0,laser->y0,dmg_rad,black);
-                                laser->erase();
-                                laser->dead = 1;
-                                return 1;
-                            }
-                        } else if (laser->y0 > barriers[0].y1 - 12){
-                            if (barriers[barrier_num].hitbox[hitbox_num + 5].hit == 0){
-                                barriers[barrier_num].hitbox[hitbox_num + 5].hit = 1;
-                                drawcirc(laser->x0,laser->y0,dmg_rad,black);
-                                laser->erase();
-                                laser->dead = 1;
-                                return 1;
-                            }
-                        } else if (laser->y0 > barriers[0].y1 - 18){
-                            if (barriers[barrier_num].hitbox[hitbox_num].hit == 0){
-                                barriers[barrier_num].hitbox[hitbox_num].hit = 1;
-                                drawcirc(laser->x0,laser->y0,dmg_rad,black);
-                                laser->erase();
-                                laser->dead = 1;
-                                return 1;
-                            } else {
-                                drawcirc(laser->x0, laser->y0,dmg_rad,black);
-                            }
-                        }
-                }
-            }
+            laser->u_coll_t = (laser->u_coll_t > coll_u_t) ? laser->collision() : laser->u_coll_t + 1;
             break;
     }
     return 0;
@@ -587,7 +590,7 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
     structure.y1 = y1;
     fillscr(x0, x1, y0, y1, white);
 
-    fillscr(x0 + 5, x1 - 5, y1 - 5, y1 + 5, black);
+    fillscr(x0 + 5, x1 - 5, y1 - 3, y1 + 3, black);
     fillscr(x0, x0 + 2, y0, y0 + 2, black);
     fillscr(x1 - 2, x1, y0, y0 + 2, black);
 
@@ -595,7 +598,7 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
     hitb.hit = 0;
     uchar hitb_i = 0;
     uchar hb_dx = (x1 - x0) / 5;
-    uchar hb_dy = (y1 - y0) / 3 - 1;
+    uchar hb_dy = (y1 - y0) / 3;
     for (uchar y = 0; y < 3; y++){
         hitb.y0 = y0 + y*hb_dy;
         hitb.y1 = y0 + (y+1)*hb_dy;
@@ -609,3 +612,16 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
 
     return structure;
 }
+
+/*
+ if i ever need to rework the barrier collision logic heres the prints bc dont wanna retyp
+                        serial_print("Collision at barrier num: ");
+                        serial_println(barrier_num);
+                        serial_print("Hitbox num: ");
+                        serial_println(hitbox_num);
+                        serial_print("Row num: ");
+                        serial_println(row_num);
+                        serial_print("y0: ");
+                        serial_println(laser->y0);
+                        serial_println(" ");
+*/
