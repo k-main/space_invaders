@@ -23,10 +23,15 @@
 #define max_x 239
 #define max_y 319
 
-#define dmg_rad 7
-#define coll_u_t 5
+#define hitb_x 6
+#define hitb_y 8
+#define shft_max_y 4
+#define enemies_per_row 11
+#define enemy_rows 4
 
-#define NUM_TASKS 4
+#define dmg_rad 7
+
+#define NUM_TASKS 5
 
 
 //Task struct for concurrent synchSMs implmentations
@@ -64,24 +69,46 @@ enum btn_state{
 };
 
 enum dir {up,down,left,right};
+enum enemy_type {lvl_1, lvl_2, lvl_3};
 struct laser_struct{
     uchar barrier_num, hitbox_num;
-    ushort x0, y0, y1, dead, pending_coll;
-    uchar u_coll_t;
+    uchar x0, dead, pending_coll;
+    ushort y0, y1;
     uint color;
     dir ldir;
     void erase(void);
+    void mvlaser(void);
     uchar collision(void);
 };
 
-struct player_entity{ 
+struct entity {
     dir fire_dir;
     ushort fire_pos;
-    ushort gunx0, gunx1, guny0, guny1;
-    ushort x0, x1, y0, y1;
+    uchar x0, x1;
+    ushort y0, y1;
     uint color, laser_color;
-    ushort i = 0;
 };
+
+struct player_entity : entity { 
+    ushort gunx0, gunx1, guny0, guny1;
+};
+
+struct enemy : entity {
+    void (*render_s0)(ushort, ushort, uint);
+    void (*render_s1)(ushort, ushort, uint);
+};
+
+struct enemy_row {
+    enemy enemies[enemies_per_row];
+    dir shift_dir;
+    uchar shift_i;
+    uchar shift_enemy_num;
+    uchar shift_y_c;
+    enemy_row(ushort x0, ushort y0, enemy_type type);
+    void x_shift(void);
+    void y_shift(void);
+};
+
 
 struct hitbox_ss {
     uchar x0, x1;
@@ -103,18 +130,22 @@ void setpage(uint start, uint end);
 void fillscr(void);
 void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
 void drawcirc(ushort x, ushort y, ushort r, uint color);
-void lcdinit(void);
+void initlcd(void);
 void mklaser(ushort x, ushort y, dir laser_dir, uint color);
 void renderplayer(ushort x, ushort y, uint color, uint laser_color);
 void mvplayer(uchar step_amt, dir direction);
 void drawline(ushort x, ushort y, ushort len, uint color);
+void render_s0_l1(ushort x0, ushort y0);
+void render_s1_l1(ushort x0, ushort y0);
 uchar setpx(ushort x, ushort y, uint color);
-uchar mvlaser(laser_struct* laser);
 int tick_lasers(int state);
 int tick_mv(int state);
 int tick_fire(int state);
 int tick_player(int state);
+int tick_enemies(int state);
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
+
+
 
 player_entity player;
 const uchar LSR_MAX = 10;
@@ -122,6 +153,8 @@ uchar LSR_CNT = 0;
 laser_struct* lasers[LSR_MAX];
 
 static_structure barriers[4];
+enemy_row* rows[4];
+
 // uchar barrier_num, hitbox_num;
 uchar row_num;
 
@@ -135,22 +168,30 @@ int main(void) {
     DDRB = 0b00101000; PORTB = ~0b00101111;
     serial_init(9600);
     /* initialization */
-    lcdinit();
+    initlcd();
     renderplayer(105, 300, white, cyan);
     barriers[0] = mkstruct(15, 45, 260, 284);
     barriers[1] = mkstruct(75, 105, 260, 284);
     barriers[2] = mkstruct(135, 165, 260, 284);
     barriers[3] = mkstruct(195, 225, 260, 284);
-    // hitbox_ss b = barriers[0].hitbox[0];
-    // hitbox_ss b2 = barriers[0].hitbox[6];
-    // hitbox_ss b3 = barriers[0].hitbox[12];
 
-    // fillscr(b.x0, b.x1, b.y0,b.y1,red);
-    // fillscr(b2.x0, b2.x1, b2.y0,b2.y1,red);
-    // fillscr(b3.x0, b3.x1, b3.y0,b3.y1,red);
 
-    // setpx(100,200,red);
-    
+    // enemy_row row_1 = enemy_row(max_x - 2*hitb_x,76, lvl_1);
+    // enemy_row row_2 = enemy_row(max_x - 2*hitb_x,100, lvl_1);
+    // enemy_row row_3 = enemy_row(max_x - 2*hitb_x,124, lvl_1);
+    // enemy_row row_4 = enemy_row(max_x - 2*hitb_x,148, lvl_1);
+    // rows[0] = &row_1;
+    // rows[1] = &row_2;
+    // rows[2] = &row_3;
+    // rows[3] = &row_4;
+    serial_print("size of enemy row: ");
+    serial_println(sizeof(enemy_row));
+    for (uchar i = 0; i < enemy_rows; i++){
+        
+        rows[i] = new enemy_row(max_x - 2*hitb_x, 48 + 24*i, lvl_1);
+    }
+
+    // enemy_row row_2 = enemy_row(max_x - 2*hitb_x,124, lvl_1);
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -171,16 +212,18 @@ int main(void) {
     tasks[3].state = wait;
     tasks[3].elapsedTime = 1;
     tasks[3].TickFct = &tick_player;
-    
+
+    tasks[4].period = 50;
+    tasks[4].state = update;
+    tasks[4].elapsedTime = 1;
+    tasks[4].TickFct = &tick_enemies;
     
     TimerSet(GCD_PERIOD);
     TimerOn();
 
+
     while (1) {
-        // for (uchar i = 0; i < 4; i++){
-        //     mklaser(30,1,down,red);
-        //     _delay_ms(500);
-        // }
+
     }
 
     return 0;
@@ -248,7 +291,7 @@ void fillscr(void)
     PORTD |=  0x20; // CS HIGH;
 }
 
-void lcdinit(void)
+void initlcd(void)
 {
     SPI_INIT();
     PORTD |=  0x20; // CS HIGH;
@@ -309,7 +352,7 @@ int tick_lasers(int state){
     // update laser positions
     for (uchar i = 0; i < LSR_CNT; i++){
         if (lasers[i]->dead != 1){ //laser is not dead
-            mvlaser(lasers[i]);
+            lasers[i]->mvlaser();
         }
     }
     return state;
@@ -337,7 +380,6 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     laser->color = color;
     laser->dead = 0;
     laser->pending_coll = 0;
-    laser->u_coll_t = 0;
     for (int i = 0; i < 4; i++){
         if (x >= barriers[i].x0 && x <= barriers[i].x1){
             laser->pending_coll = 1;
@@ -386,31 +428,26 @@ uchar laser_struct::collision(){
     return 0;
 }
 
-uchar mvlaser(laser_struct* laser){
-    switch (laser->ldir){
+void laser_struct::mvlaser(){
+    ushort leadingpx = (ldir == down) ? y1 : y0;
+    ushort laggingpx = (leadingpx == y1) ? y0 : y1;
+    switch(ldir){
         case down:
-            if (setpx(laser->x0, laser->y0, black) == 1){
-                laser->dead = 1;
-                return 1;
-            }
-            laser->y0 += 1;
-            laser->y1 += 1;
-            setpx(laser->x0, laser->y1, laser->color);
-            laser->u_coll_t = (laser->u_coll_t > coll_u_t) ? laser->collision() : laser->u_coll_t + 1;
-            break;
+            dead = (setpx(x0,laggingpx,black) == 1) ? 1 : 0;
+            if (dead) break;
+            y0 += 1;
+            y1 += 1;
+            setpx(x0,leadingpx,color);
+        break;
         case up:
-            
-            if (setpx(laser->x0, laser->y1, black) == 1){
-                laser->dead = 1;
-                return 1;
-            }
-            laser->y1 -= 1;
-            laser->y0 -= 1;
-            setpx(laser->x0, laser->y0, laser->color);
-            laser->u_coll_t = (laser->u_coll_t > coll_u_t) ? laser->collision() : laser->u_coll_t + 1;
-            break;
+            dead = (setpx(x0,laggingpx,black) == 1) ? 1 : 0;
+            if (dead) break;
+            y0 -= 1;
+            y1 -= 1;
+            setpx(x0,leadingpx,color);
+        break;
     }
-    return 0;
+    if (leadingpx % 8 == 0) collision();
 }
 
 void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color){
@@ -613,15 +650,120 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
     return structure;
 }
 
-/*
- if i ever need to rework the barrier collision logic heres the prints bc dont wanna retyp
-                        serial_print("Collision at barrier num: ");
-                        serial_println(barrier_num);
-                        serial_print("Hitbox num: ");
-                        serial_println(hitbox_num);
-                        serial_print("Row num: ");
-                        serial_println(row_num);
-                        serial_print("y0: ");
-                        serial_println(laser->y0);
-                        serial_println(" ");
-*/
+void render_s0_l1(ushort x0, ushort y0, uint color){
+    fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
+}
+
+void render_s1_l1(ushort x0, ushort y0, uint color){
+    fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
+}
+
+enemy_row::enemy_row(ushort x0, ushort y0, enemy_type enemy){
+    shift_i = 0;
+    shift_y_c = 0;
+    shift_enemy_num = 0;
+    shift_dir = (x0 == 2*hitb_x) ? right : left;
+    // shift_dir = (x0 == 2*hitb_x) ? right : left;
+    // uchar x0 = (shift_dir == right) ? 2*hitb_x : max_x - 2*hitb_x;
+
+    for (uchar i = 0; i < enemies_per_row; i++){
+        enemies[i].x0 = x0;
+        enemies[i].y0 = y0;
+        switch (enemy){
+            case lvl_1:
+            enemies[i].render_s0 = &render_s0_l1;
+            enemies[i].render_s1 = &render_s1_l1;
+            break;
+        }
+        (shift_dir == right) ? enemies[i].render_s0(x0,y0,blue) : enemies[i].render_s0(x0 - 2*hitb_x, y0,blue);
+        x0 = (shift_dir == right) ? x0 + 3*hitb_x : x0 - 3*hitb_x;
+    }
+    
+}
+
+
+
+
+void enemy_row::x_shift(void){
+    if (shift_i < 30){
+        switch(shift_dir){
+
+            case right:
+                // for (uchar i = 0; i < enemies_per_row; i++){
+                // }
+                    switch(shift_i % 2){
+                        case 0:
+                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,black);
+                            enemies[shift_enemy_num].x0 += 1;
+                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,cyan);
+                        break;
+                        case 1:
+                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,black);
+                            enemies[shift_enemy_num].x0 += 1;
+                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,blue);
+                        break;
+                    }
+            break;
+
+            case left:
+                // for (uchar i = 0; i < enemies_per_row; i++){
+                // }
+                    switch(shift_i % 2){
+                        case 0:
+                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, black);
+                            enemies[shift_enemy_num].x0 -= 1;
+                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, cyan);
+                        break;
+                        case 1:
+                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, black);
+                            enemies[shift_enemy_num].x0 -= 1;
+                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, blue);
+                        break;
+                    }
+            break;
+        }  
+    shift_i = (shift_enemy_num == enemies_per_row - 1) ? shift_i + 1 : shift_i;
+    shift_enemy_num = (shift_enemy_num < enemies_per_row - 1) ? shift_enemy_num + 1 : 0;
+    // shift_i += 1;
+    } 
+}
+
+void enemy_row::y_shift(){
+    switch(shift_dir){
+        case right:
+            for (uchar i = 0; i < enemies_per_row; i++){
+                enemies[i].render_s0(enemies[i].x0,enemies[i].y0,black);
+                if (shift_y_c < shft_max_y) enemies[i].y0 += 3*hitb_y;
+                shift_dir = left;
+                enemies[i].render_s1(enemies[i].x0, enemies[i].y0, white);
+                enemies[i].x0 += 2*hitb_x;
+                shift_i = 0;
+            }
+        break;
+        case left:
+            for (uchar i = 0; i < enemies_per_row; i++){
+                enemies[i].render_s0(enemies[i].x0 - 2*hitb_x, enemies[i].y0,black);
+                if (shift_y_c < shft_max_y) enemies[i].y0 += 3*hitb_y;
+                shift_dir = right;
+                enemies[i].render_s1(enemies[i].x0 - 2*hitb_x, enemies[i].y0,white);
+                enemies[i].x0 -= 2*hitb_x;
+                shift_i = 0;
+            }
+        break;
+    }
+    shift_y_c = (shift_y_c < shft_max_y) ? shift_y_c + 1 : shift_y_c;
+
+}
+
+int tick_enemies(int state){
+    for (uchar i = 0; i < enemy_rows; i++){
+        rows[i]->x_shift();
+    }
+
+    if (rows[enemy_rows - 1]->shift_i == 30){
+        for (uchar i = enemy_rows; i > 0; i--){
+            rows[i - 1]->y_shift();
+        }
+    }
+    return state;
+}
