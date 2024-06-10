@@ -199,7 +199,7 @@ int main(void) {
     tasks[3].elapsedTime = 1;
     tasks[3].TickFct = &tick_player;
 
-    tasks[4].period = 50;
+    tasks[4].period = 5;
     tasks[4].state = update;
     tasks[4].elapsedTime = 1;
     tasks[4].TickFct = &tick_enemies;
@@ -685,26 +685,28 @@ uchar enemy_row::x_shift(void){
 }
 
 uchar enemy_row::y_shift(void){
-    //erase the row
-    //increment y by 3*hitb_y
-    //re-render row
-    for (uchar i = 0; i < enemies_per_row; i++){
-        // if x is even, sprite 0 is rendered.
-        enemy _enemy = enemies[i];
-        if (_enemy.x0 % 2 == 0){
-            render_s0_l1(_enemy.x0,_enemy.y0,black);
-            _enemy.y0 += 3*hitb_y;
-            enemies[i].y0 = _enemy.y0;
-            
-            render_s0_l1(_enemy.x0, _enemy.y0,blue);
-        } else {
-            render_s1_l1(_enemy.x0,_enemy.y0,black);
-            _enemy.y0 += 3*hitb_y;
-            enemies[i].y0 = _enemy.y0;
 
-            render_s1_l1(_enemy.x0,_enemy.y0,cyan);
-        }
-    }
+    // enemy _enemy0 = enemies[0];
+    // for (uchar i = 0; i < enemies_per_row; i++){
+    //     // erase current line
+    //     enemy _enemy = enemies[i];
+    //     if (_enemy.x0 % 2 == 0){
+    //         _enemy.render_s0(_enemy.x0,_enemy.y0,black);
+    //     } else {
+    //         _enemy.render_s1(_enemy.x0,_enemy.y0,black);
+    //     }
+    //     // shift down by 1
+    //     enemies[i].y0 += 3*hitb_y;
+    //     // rewrite line with respect to x0;
+    //     enemies[i].x0 = _enemy0.x0 + 3*i*hitb_x;
+    //     _enemy = enemies[i]; // minimize ur array accesses man
+    //     if (_enemy.x0 % 2 == 0){
+    //         _enemy.render_s0(_enemy.x0, _enemy.y0, blue);
+    //     } else {
+    //         _enemy.render_s1(_enemy.x0, _enemy.y0, cyan);
+    //     }
+    // }
+
     shift_i_y += 1;
     shift_dir = (shift_dir == right) ? left : right;
 }
