@@ -27,7 +27,9 @@
 #define hitb_y 8
 #define shft_max_y 4
 #define enemies_per_row 11
-#define enemy_rows 4
+#define enemy_rows 1
+#define row_offst 21
+
 
 #define dmg_rad 7
 
@@ -94,6 +96,7 @@ struct player_entity : entity {
 };
 
 struct enemy : entity {
+    uchar dead;
     void (*render_s0)(ushort, ushort, uint);
     void (*render_s1)(ushort, ushort, uint);
 };
@@ -103,10 +106,11 @@ struct enemy_row {
     dir shift_dir;
     uchar shift_i;
     uchar shift_enemy_num;
-    uchar shift_y_c;
-    enemy_row(ushort x0, ushort y0, enemy_type type);
-    void x_shift(void);
-    void y_shift(void);
+    uchar shift_i_y;
+    enemy_row(ushort y0, enemy_type type, dir);
+    void erase(uchar enemy_num);
+    uchar x_shift(void);
+    uchar y_shift(void);
 };
 
 
@@ -135,25 +139,23 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color);
 void renderplayer(ushort x, ushort y, uint color, uint laser_color);
 void mvplayer(uchar step_amt, dir direction);
 void drawline(ushort x, ushort y, ushort len, uint color);
-void render_s0_l1(ushort x0, ushort y0);
-void render_s1_l1(ushort x0, ushort y0);
+void render_s0_l1(ushort x0, ushort y0, uint color);
+void render_s1_l1(ushort x0, ushort y0, uint color);
 uchar setpx(ushort x, ushort y, uint color);
+
 int tick_lasers(int state);
 int tick_mv(int state);
 int tick_fire(int state);
 int tick_player(int state);
 int tick_enemies(int state);
+
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
-
-
-
 player_entity player;
 const uchar LSR_MAX = 10;
 uchar LSR_CNT = 0;
 laser_struct* lasers[LSR_MAX];
-
 static_structure barriers[4];
-enemy_row* rows[4];
+enemy_row* rows[1];
 
 // uchar barrier_num, hitbox_num;
 uchar row_num;
@@ -175,23 +177,7 @@ int main(void) {
     barriers[2] = mkstruct(135, 165, 260, 284);
     barriers[3] = mkstruct(195, 225, 260, 284);
 
-
-    // enemy_row row_1 = enemy_row(max_x - 2*hitb_x,76, lvl_1);
-    // enemy_row row_2 = enemy_row(max_x - 2*hitb_x,100, lvl_1);
-    // enemy_row row_3 = enemy_row(max_x - 2*hitb_x,124, lvl_1);
-    // enemy_row row_4 = enemy_row(max_x - 2*hitb_x,148, lvl_1);
-    // rows[0] = &row_1;
-    // rows[1] = &row_2;
-    // rows[2] = &row_3;
-    // rows[3] = &row_4;
-    serial_print("size of enemy row: ");
-    serial_println(sizeof(enemy_row));
-    for (uchar i = 0; i < enemy_rows; i++){
-        
-        rows[i] = new enemy_row(max_x - 2*hitb_x, 48 + 24*i, lvl_1);
-    }
-
-    // enemy_row row_2 = enemy_row(max_x - 2*hitb_x,124, lvl_1);
+    rows[0] = new enemy_row(100,lvl_1,right); // writes directly to the screen
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -425,6 +411,7 @@ uchar laser_struct::collision(){
             } else if (row_num == 0) drawcirc(x0,y0,dmg_rad,black);
         }
     }
+    // enemy collision
     return 0;
 }
 
@@ -658,111 +645,94 @@ void render_s1_l1(ushort x0, ushort y0, uint color){
     fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
 }
 
-enemy_row::enemy_row(ushort x0, ushort y0, enemy_type enemy){
-    shift_i = 0;
-    shift_y_c = 0;
-    shift_enemy_num = 0;
-    shift_dir = (x0 == 2*hitb_x) ? right : left;
-    // shift_dir = (x0 == 2*hitb_x) ? right : left;
-    // uchar x0 = (shift_dir == right) ? 2*hitb_x : max_x - 2*hitb_x;
-
-    for (uchar i = 0; i < enemies_per_row; i++){
-        enemies[i].x0 = x0;
+enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
+    for (unsigned char i = 0; i < enemies_per_row; i++){
+        unsigned char enemy_x0 = row_offst + 3*i*hitb_x;
+        render_s0_l1(enemy_x0, y0, blue);
+        enemies[i].x0 = enemy_x0;
+        enemies[i].x1 = enemy_x0 + 2*hitb_x;
         enemies[i].y0 = y0;
-        switch (enemy){
-            case lvl_1:
-            enemies[i].render_s0 = &render_s0_l1;
-            enemies[i].render_s1 = &render_s1_l1;
-            break;
+        enemies[i].y1 = y0 + hitb_y;
+    }
+    shift_dir = enemy_dir;
+    shift_i = 0;
+    shift_enemy_num = 0;
+    shift_i_y = 0;
+}
+
+uchar enemy_row::x_shift(void){
+    enemy _enemy = enemies[shift_i];
+    uint color = (_enemy.x0 % 2 == 0) ? blue : cyan;
+
+    if (_enemy.x0 % 2 == 0){
+        render_s0_l1(_enemy.x0, _enemy.y0, black);
+        _enemy.x0 = (shift_dir == right) ? _enemy.x0 + 1 : _enemy.x0 - 1;
+        enemies[shift_i].x0 = _enemy.x0;
+        render_s1_l1(_enemy.x0, _enemy.y0, color);
+    } else {
+        render_s1_l1(_enemy.x0, _enemy.y0, black);
+        _enemy.x0 = (shift_dir == right) ? _enemy.x0 + 1 : _enemy.x0 - 1;
+        enemies[shift_i].x0 = _enemy.x0;
+        render_s0_l1(_enemy.x0, _enemy.y0, color);
+    }
+
+    if (shift_i == 10 && enemies[shift_i].x0 + 2*hitb_x > max_x - hitb_x && shift_i_y < shft_max_y) {
+        y_shift();
+    }
+
+    shift_i = (shift_i >= enemies_per_row - 1) ? 0 : shift_i + 1;
+    return 0;
+}
+
+uchar enemy_row::y_shift(void){
+    //erase the row
+    //increment y by 3*hitb_y
+    //re-render row
+    for (uchar i = 0; i < enemies_per_row; i++){
+        // if x is even, sprite 0 is rendered.
+        enemy _enemy = enemies[i];
+        if (_enemy.x0 % 2 == 0){
+            render_s0_l1(_enemy.x0,_enemy.y0,black);
+            _enemy.y0 += 3*hitb_y;
+            enemies[i].y0 = _enemy.y0;
+            
+            render_s0_l1(_enemy.x0, _enemy.y0,blue);
+        } else {
+            render_s1_l1(_enemy.x0,_enemy.y0,black);
+            _enemy.y0 += 3*hitb_y;
+            enemies[i].y0 = _enemy.y0;
+
+            render_s1_l1(_enemy.x0,_enemy.y0,cyan);
         }
-        (shift_dir == right) ? enemies[i].render_s0(x0,y0,blue) : enemies[i].render_s0(x0 - 2*hitb_x, y0,blue);
-        x0 = (shift_dir == right) ? x0 + 3*hitb_x : x0 - 3*hitb_x;
     }
-    
-}
-
-
-
-
-void enemy_row::x_shift(void){
-    if (shift_i < 30){
-        switch(shift_dir){
-
-            case right:
-                // for (uchar i = 0; i < enemies_per_row; i++){
-                // }
-                    switch(shift_i % 2){
-                        case 0:
-                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,black);
-                            enemies[shift_enemy_num].x0 += 1;
-                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,cyan);
-                        break;
-                        case 1:
-                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,black);
-                            enemies[shift_enemy_num].x0 += 1;
-                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0,enemies[shift_enemy_num].y0,blue);
-                        break;
-                    }
-            break;
-
-            case left:
-                // for (uchar i = 0; i < enemies_per_row; i++){
-                // }
-                    switch(shift_i % 2){
-                        case 0:
-                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, black);
-                            enemies[shift_enemy_num].x0 -= 1;
-                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, cyan);
-                        break;
-                        case 1:
-                            enemies[shift_enemy_num].render_s1(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, black);
-                            enemies[shift_enemy_num].x0 -= 1;
-                            enemies[shift_enemy_num].render_s0(enemies[shift_enemy_num].x0 - 2*hitb_x, enemies[shift_enemy_num].y0, blue);
-                        break;
-                    }
-            break;
-        }  
-    shift_i = (shift_enemy_num == enemies_per_row - 1) ? shift_i + 1 : shift_i;
-    shift_enemy_num = (shift_enemy_num < enemies_per_row - 1) ? shift_enemy_num + 1 : 0;
-    // shift_i += 1;
-    } 
-}
-
-void enemy_row::y_shift(){
-    switch(shift_dir){
-        case right:
-            for (uchar i = 0; i < enemies_per_row; i++){
-                enemies[i].render_s0(enemies[i].x0,enemies[i].y0,black);
-                if (shift_y_c < shft_max_y) enemies[i].y0 += 3*hitb_y;
-                shift_dir = left;
-                enemies[i].render_s1(enemies[i].x0, enemies[i].y0, white);
-                enemies[i].x0 += 2*hitb_x;
-                shift_i = 0;
-            }
-        break;
-        case left:
-            for (uchar i = 0; i < enemies_per_row; i++){
-                enemies[i].render_s0(enemies[i].x0 - 2*hitb_x, enemies[i].y0,black);
-                if (shift_y_c < shft_max_y) enemies[i].y0 += 3*hitb_y;
-                shift_dir = right;
-                enemies[i].render_s1(enemies[i].x0 - 2*hitb_x, enemies[i].y0,white);
-                enemies[i].x0 -= 2*hitb_x;
-                shift_i = 0;
-            }
-        break;
-    }
-    shift_y_c = (shift_y_c < shft_max_y) ? shift_y_c + 1 : shift_y_c;
-
+    shift_i_y += 1;
+    shift_dir = (shift_dir == right) ? left : right;
 }
 
 int tick_enemies(int state){
     for (uchar i = 0; i < enemy_rows; i++){
-        rows[i]->x_shift();
-    }
-
-    if (rows[enemy_rows - 1]->shift_i == 30){
-        for (uchar i = enemy_rows; i > 0; i--){
-            rows[i - 1]->y_shift();
+        if (rows[i]->shift_dir == right) {
+            if (rows[i]->enemies[10].x0 + 2*hitb_x > max_x - hitb_x){
+                if (rows[i]->shift_i_y < shft_max_y){
+                    rows[i]->y_shift();
+                    rows[i]->x_shift();
+                } else {
+                    rows[i]->shift_dir = left;
+                    rows[i]->x_shift();
+                }
+            }
+            rows[i]->x_shift();
+        } else { // shift dir is left
+            if (rows[i]->enemies[0].x0 < hitb_x) {
+                if (rows[i]->shift_i_y < shft_max_y){
+                    rows[i]->y_shift();
+                    rows[i]->x_shift();
+                } else {
+                    rows[i]->shift_dir = right;
+                    rows[i]->x_shift();
+                }
+            }
+            rows[i]->x_shift();
         }
     }
     return state;
