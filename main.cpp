@@ -25,7 +25,7 @@
 
 #define hitb_x 6
 #define hitb_y 8
-#define shft_max_y 4
+#define shft_max_y 2
 #define enemies_per_row 11
 #define enemy_rows 1
 #define row_offst 21
@@ -107,6 +107,7 @@ struct enemy_row {
     uchar shift_i;
     uchar shift_enemy_num;
     uchar shift_i_y;
+    uchar l_most, r_most, r_synch;
     enemy_row(ushort y0, enemy_type type, dir);
     void erase(uchar enemy_num);
     uchar x_shift(void);
@@ -654,6 +655,9 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
         enemies[i].y0 = y0;
         enemies[i].y1 = y0 + hitb_y;
     }
+    r_synch = 1;
+    l_most = 0;
+    r_most = enemies_per_row - 1;
     shift_dir = enemy_dir;
     shift_i = 0;
     shift_enemy_num = 0;
@@ -661,8 +665,11 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
 }
 
 uchar enemy_row::x_shift(void){
+
     enemy _enemy = enemies[shift_i];
     uint color = (_enemy.x0 % 2 == 0) ? blue : cyan;
+
+
 
     if (_enemy.x0 % 2 == 0){
         render_s0_l1(_enemy.x0, _enemy.y0, black);
@@ -676,8 +683,10 @@ uchar enemy_row::x_shift(void){
         render_s0_l1(_enemy.x0, _enemy.y0, color);
     }
 
-    if (shift_i == 10 && enemies[shift_i].x0 + 2*hitb_x > max_x - hitb_x && shift_i_y < shft_max_y) {
-        y_shift();
+    if (shift_i == 0) {
+        r_synch = 0;
+    } else if (shift_i == r_most) {
+        r_synch = 1;
     }
 
     shift_i = (shift_i >= enemies_per_row - 1) ? 0 : shift_i + 1;
@@ -685,57 +694,36 @@ uchar enemy_row::x_shift(void){
 }
 
 uchar enemy_row::y_shift(void){
+    for (uchar i = 0; i < enemies_per_row; i++){
+        enemy _enemy = enemies[i];
+        // eraase the enemy
+        if (enemies[i].x0 % 2) {
+            render_s0_l1(_enemy.x0, _enemy.y0, black);
+        } else {
+            render_s1_l1(_enemy.x0, _enemy.y0, black);
+        }
+        enemies[i].y0 += 3*hitb_y;
+        if (enemies[i].x0 % 2) {
+            render_s0_l1(_enemy.x0, _enemy.y0, blue);
+        } else {
+            render_s1_l1(_enemy.x0, _enemy.y0, cyan);
+        }
+        shift_i_y += 1;
+    }
+    
 
-    // enemy _enemy0 = enemies[0];
-    // for (uchar i = 0; i < enemies_per_row; i++){
-    //     // erase current line
-    //     enemy _enemy = enemies[i];
-    //     if (_enemy.x0 % 2 == 0){
-    //         _enemy.render_s0(_enemy.x0,_enemy.y0,black);
-    //     } else {
-    //         _enemy.render_s1(_enemy.x0,_enemy.y0,black);
-    //     }
-    //     // shift down by 1
-    //     enemies[i].y0 += 3*hitb_y;
-    //     // rewrite line with respect to x0;
-    //     enemies[i].x0 = _enemy0.x0 + 3*i*hitb_x;
-    //     _enemy = enemies[i]; // minimize ur array accesses man
-    //     if (_enemy.x0 % 2 == 0){
-    //         _enemy.render_s0(_enemy.x0, _enemy.y0, blue);
-    //     } else {
-    //         _enemy.render_s1(_enemy.x0, _enemy.y0, cyan);
-    //     }
-    // }
-
-    shift_i_y += 1;
-    shift_dir = (shift_dir == right) ? left : right;
+    return 0;
 }
 
 int tick_enemies(int state){
     for (uchar i = 0; i < enemy_rows; i++){
-        if (rows[i]->shift_dir == right) {
-            if (rows[i]->enemies[10].x0 + 2*hitb_x > max_x - hitb_x){
-                if (rows[i]->shift_i_y < shft_max_y){
-                    rows[i]->y_shift();
-                    rows[i]->x_shift();
-                } else {
-                    rows[i]->shift_dir = left;
-                    rows[i]->x_shift();
-                }
+        enemy_row row = *rows[i];
+        if (row.enemies[row.l_most].x0 <= hitb_x || row.enemies[row.r_most].x0 + 2*hitb_x >= max_x - hitb_x){
+            if (row.r_synch == 1) {
+                rows[i]->shift_dir = (rows[i]->shift_dir == right) ? left : right;
             }
-            rows[i]->x_shift();
-        } else { // shift dir is left
-            if (rows[i]->enemies[0].x0 < hitb_x) {
-                if (rows[i]->shift_i_y < shft_max_y){
-                    rows[i]->y_shift();
-                    rows[i]->x_shift();
-                } else {
-                    rows[i]->shift_dir = right;
-                    rows[i]->x_shift();
-                }
-            }
-            rows[i]->x_shift();
         }
+        rows[i]->x_shift();
     }
     return state;
 }
