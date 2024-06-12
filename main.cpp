@@ -99,6 +99,7 @@ struct enemy : entity {
     uchar dead;
     void (*render_s0)(ushort, ushort, uint);
     void (*render_s1)(ushort, ushort, uint);
+    void perish(void);
     void render0(uint c);
     void render1(uint c);
 };
@@ -112,6 +113,8 @@ struct enemy_row {
     uchar hp, shifted;
     enemy_row(ushort y0, enemy_type type, dir);
     void erase(uchar enemy_num);
+    void set_rmost(void);
+    void set_lmost(void);
     uchar x_shift(void);
     uchar y_shift(void);
 };
@@ -428,14 +431,24 @@ uchar laser_struct::collision(){
 
         if (!(_enemy.y0 + 2*hitb_y - y0 < 2*hitb_y)) continue;
 
-        short hit = map_value(row.enemies[row.l_most].x0, row.enemies[row.r_most].x0+2*hitb_x,0,enemies_per_row - 1,x0);
+        short hit = map_value(row.enemies[row.l_most].x0, row.enemies[row.r_most].x0+2*hitb_x,row.l_most,row.r_most + 1,x0);
         if (hit >= 11 || hit < 0) continue;
         
-        enemy enemy_hit = rows[i]->enemies[hit];
+
         serial_print("Hit : "); serial_println(hit);
-        if (enemy_hit.dead == 0){
-             rows[i]->enemies[hit].dead = 1;
-            (enemy_hit.x0 % 2 == 0) ? enemy_hit.render0(black) : enemy_hit.render1(black);
+        enemy enemy_hit = rows[i]->enemies[hit];
+        if (!enemy_hit.dead){
+
+            if (enemy_hit.x0 + 2*hitb_x - x0 <= 2*hitb_x) {
+                rows[i]->enemies[hit].perish();
+                if (hit == rows[i]->l_most){
+                    rows[i]->set_lmost();
+                } else if (hit == rows[i]->r_most){
+                    rows[i]->set_rmost();
+                }
+            }
+
+
         }
     }
     // todo: enemies shooting at player
@@ -666,6 +679,12 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
     return structure;
 }
 
+void enemy::perish(void){
+    // (x0 % 2 == 0) ? render0(black) : render1(black);
+    fillscr(x0, x0+2*hitb_x,y0,y0+2*hitb_y,black);
+    dead = 1;
+}
+
 void enemy::render0(uint c){
     render_s0(x0,y0,c);
 }
@@ -703,6 +722,26 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     shift_i_y = 0;
 }
 
+void enemy_row::set_lmost(void){
+    for (short i = l_most; i < enemies_per_row; i++){
+        if (enemies[i].dead == 0){
+            l_most = i;
+            serial_print("l_most is now : "); serial_println(l_most);
+            break;
+        }
+    }
+}
+
+void enemy_row::set_rmost(void){
+    for (short i = r_most; i >= 0; i--){
+        if (enemies[i].dead == 0){
+            r_most = i;
+            serial_print("r_most is now : "); serial_println(r_most);
+            break;
+        }
+    }
+}
+
 uchar enemy_row::x_shift(void){
 
     enemy _enemy = enemies[shift_i];
@@ -727,13 +766,14 @@ uchar enemy_row::x_shift(void){
         render_s0_l1(_enemy.x0, _enemy.y0, color);
     }
 
-    if (shift_i == 0) {
+    if (shift_i == l_most) {
         r_synch = 0;
-    } else if (shift_i == r_most) {
+    } 
+    if (shift_i == r_most) {
         r_synch = 1;
     }
 
-    shift_i = (shift_i >= enemies_per_row - 1) ? 0 : shift_i + 1;
+    shift_i = (shift_i >= r_most) ? l_most : shift_i + 1;
     return 0;
 }
 
