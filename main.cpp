@@ -27,7 +27,7 @@
 #define hitb_y 8
 #define shft_max_y 4
 #define enemies_per_row 11
-#define enemy_rows 1
+#define enemy_rows 0
 #define row_offst 21
 
 
@@ -147,6 +147,8 @@ void mvplayer(uchar step_amt, dir direction);
 void drawline(ushort x, ushort y, ushort len, uint color);
 void render_s0_l1(ushort x0, ushort y0, uint color);
 void render_s1_l1(ushort x0, ushort y0, uint color);
+void render_s0_l2(ushort x0, ushort y0, uint color);
+void render_s1_l2(ushort x0, ushort y0, uint color);
 uchar setpx(ushort x, ushort y, uint color);
 
 int tick_lasers(int state);
@@ -189,6 +191,9 @@ int main(void) {
         rows[i] = new enemy_row(enemy_start_y + 3*i*hitb_y,lvl_1,enemy_dir);
         enemy_dir = (enemy_dir == right) ? left : right;
     }
+
+    // render_s0_l1(100,100,white);
+    // render_s1_l1(120,100,white);
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -418,38 +423,44 @@ uchar laser_struct::collision(){
                 barriers[barrier_num].hitbox[hitbox_num + 10*arr_offst + row_coeff*5*row_num].hit = 1;
                 drawcirc(x0,leading_px,dmg_rad,black); // replace with dmg sprite
                 erase();
-                dead = 1;
             } else if (row_num == 0) drawcirc(x0,y0,dmg_rad,black);
         }
     }
     // player shooting at enemies
 
-    for (short i = enemy_rows - 1; i >= 0; i--){
-        if (!rows[i]->hp) continue;
-        enemy_row row = *rows[i];
-        enemy _enemy = row.enemies[row.r_most]; // doesnt matter, just need a valid one
+    short hit;
+    if (ldir == up){
+        for (short i = enemy_rows - 1; i >= 0; i--){
+            if (!rows[i]->hp) continue;
+            enemy_row row = *rows[i];
+            enemy _enemy = row.enemies[row.r_most]; // doesnt matter, just need a valid one
 
-        if (!(_enemy.y0 + 2*hitb_y - y0 < 2*hitb_y)) continue;
-
-        short hit = map_value(row.enemies[row.l_most].x0, row.enemies[row.r_most].x0+2*hitb_x,row.l_most,row.r_most + 1,x0);
-        if (hit >= 11 || hit < 0) continue;
-        
-
-        serial_print("Hit : "); serial_println(hit);
-        enemy enemy_hit = rows[i]->enemies[hit];
-        if (!enemy_hit.dead){
-
-            if (enemy_hit.x0 + 2*hitb_x - x0 <= 2*hitb_x) {
-                rows[i]->enemies[hit].perish();
-                if (hit == rows[i]->l_most){
-                    rows[i]->set_lmost();
-                } else if (hit == rows[i]->r_most){
-                    rows[i]->set_rmost();
+            if (_enemy.y0 + 2*hitb_y - y0 < 2*hitb_y){
+                hit = map_value(row.enemies[row.l_most].x0, row.enemies[row.r_most].x0+2*hitb_x,row.l_most,row.r_most + 1,x0);
+                if (hit >= 11 || hit < 0){
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            
+            enemy enemy_hit = rows[i]->enemies[hit];
+            if (!enemy_hit.dead){
+                if (enemy_hit.x0 + 2*hitb_x - x0 <= 2*hitb_x) {
+                    rows[i]->enemies[hit].perish();
+                    erase();
+                    if (hit == rows[i]->l_most){
+                        rows[i]->set_lmost();
+                    } else if (hit == rows[i]->r_most){
+                        rows[i]->set_rmost();
+                    }
+                    rows[i]->hp = rows[i]->hp - 1;
+                    return 0;
                 }
             }
-
-
         }
+    } else {
+        
     }
     // todo: enemies shooting at player
     return 0;
@@ -646,6 +657,7 @@ void laser_struct::erase(void){
     for (ushort i = y0; i <= y1; i++){
         setpx(x0,i,black);
     }
+    dead = 1;
 }
 
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
@@ -694,19 +706,72 @@ void enemy::render1(uint c){
 }
 
 void render_s0_l1(ushort x0, ushort y0, uint color){
-    fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
+    // fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
+    ushort x0plus2hb = x0 + 2*hitb_x;
+    ushort y0plus6 = y0 + 6;
+    ushort hbdiv2 = hitb_x >> 1;
+    fillscr(x0 + 1, x0plus2hb - 1, y0 + 3, y0plus6 + hitb_y, color); 
+
+    // corners
+    setpx(x0 + 1, y0 + 3, black); setpx(x0plus2hb - 1, y0 + 3, black);
+    setpx(x0 + 1, y0plus6 + hitb_y, black); setpx(x0plus2hb - 1, y0plus6 + hitb_y, black);
+    
+    // eyes
+    fillscr(x0 + 3, x0 + 5, y0 + 5, y0 + 7, black);
+    fillscr(x0plus2hb - 5, x0plus2hb - 3, y0 + 5, y0 + 7, black);
+
+    fillscr(x0 + 3, x0plus2hb - 3, y0 + 3 + hitb_y, y0 + 5 + hitb_y, black);
+    fillscr(x0 + 6, x0plus2hb - 6, y0 + 5 + hitb_y, y0plus6 + hitb_y, black);
+    
+    setpx(x0 + hbdiv2, y0 + 2, color); setpx(x0 + hbdiv2 - 1, y0 + 1, color);
+    setpx(x0plus2hb - 1 - hbdiv2, y0 + 2, color); setpx(x0plus2hb - 1 - hbdiv2 + 1, y0 + 1, color);
 }
 
 void render_s1_l1(ushort x0, ushort y0, uint color){
-    fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
+    ushort x0plus2hb = x0 + 2*hitb_x;
+    ushort hbdiv2 = hitb_x >> 1;
+    fillscr(x0 + 1, x0plus2hb - 1, y0 + 3, y0 + 3 + hitb_y, color); 
+    
+    // corners
+    setpx(x0 + 1, y0 + 3, black); setpx(x0plus2hb - 1, y0 + 3, black);
+    setpx(x0 + 1, y0 + 3 + hitb_y, black); setpx(x0plus2hb - 1, y0 + 3 + hitb_y, black);
+    // antenna
+    setpx(x0 + (hitb_x >> 2), y0 + 2, color); setpx(x0 + (hitb_x >> 2) - 1, y0 + 1, color);
+    setpx(x0plus2hb - 1 - (hitb_x >> 2), y0 + 2, color); setpx(x0plus2hb - 1 - (hitb_x >> 2) + 1, y0 + 1, color);
+    // eyes
+    fillscr(x0 + 3, x0 + 5, y0 + 5, y0 + 7, black);
+    fillscr(x0plus2hb - 5, x0plus2hb - 3, y0 + 5, y0 + 7, black);
+
+    fillscr(x0 + hbdiv2 - 2, x0 + hbdiv2, y0 + 4 + hitb_y, y0 + 4 + hitb_y, color);
+    fillscr(x0 + hbdiv2 - 3, x0 + hbdiv2 - 1, y0 + 5 + hitb_y, y0 + 5 + hitb_y, color);
+
+    fillscr(x0plus2hb - hbdiv2, x0plus2hb - hbdiv2 + 2, y0 + 4 + hitb_y, y0 + 4 + hitb_y, color);
+    fillscr(x0plus2hb - hbdiv2 + 1, x0plus2hb - hbdiv2 + 3, y0 + 5 + hitb_y, y0 + 5 + hitb_y, color);
 }
 
+
 enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
+    void (*render_0)(ushort, ushort, uint);
+    void (*render_1)(ushort, ushort, uint);
+
+    switch(enemy){
+        case lvl_1:
+            render_0 = render_s0_l1;
+            render_1 = render_s1_l1;
+        break;
+        case lvl_2:
+        
+        break;
+        case lvl_3:
+
+        break;
+    }
+
     for (unsigned char i = 0; i < enemies_per_row; i++){
         unsigned char enemy_x0 = row_offst + 3*i*hitb_x;
-        render_s0_l1(enemy_x0, y0, blue);
-        enemies[i].render_s0 = &render_s0_l1;
-        enemies[i].render_s1 = &render_s1_l1;
+        render_s0_l1(enemy_x0, y0, white);
+        enemies[i].render_s0 = render_0;
+        enemies[i].render_s1 = render_1;
         enemies[i].x0 = enemy_x0;
         enemies[i].x1 = enemy_x0 + 2*hitb_x;
         enemies[i].y0 = y0;
@@ -716,7 +781,7 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     r_synch = 1;
     l_most = 0;
     r_most = enemies_per_row - 1;
-    hp = enemies_per_row; // on hit, decriment
+    hp = enemies_per_row;
     shift_dir = enemy_dir;
     shift_i = 0;
     shift_i_y = 0;
@@ -750,28 +815,19 @@ uchar enemy_row::x_shift(void){
         return 0;
     }
     
-    uint color = (_enemy.x0 % 2 == 0) ? blue : cyan;
+    fillscr(_enemy.x0,_enemy.x0 + 2*hitb_x, _enemy.y0, _enemy.y0 + 2*hitb_y, black); // erase   
+    _enemy.x0 = (shift_dir == right) ? _enemy.x0 + 1 : _enemy.x0 - 1;                // shift
+    enemies[shift_i].x0 = _enemy.x0;                                                 // reassign
+    (_enemy.x0 % 2 == 0) ? _enemy.render0(white) : _enemy.render1(white);              // re render
+    r_synch = (shift_i == l_most) ? 0 : r_synch;
+    r_synch = (shift_i == r_most) ? 1 : r_synch;
 
-
-
-    if (_enemy.x0 % 2 == 0){
-        render_s0_l1(_enemy.x0, _enemy.y0, black);
-        _enemy.x0 = (shift_dir == right) ? _enemy.x0 + 1 : _enemy.x0 - 1;
-        enemies[shift_i].x0 = _enemy.x0;
-        render_s1_l1(_enemy.x0, _enemy.y0, color);
-    } else {
-        render_s1_l1(_enemy.x0, _enemy.y0, black);
-        _enemy.x0 = (shift_dir == right) ? _enemy.x0 + 1 : _enemy.x0 - 1;
-        enemies[shift_i].x0 = _enemy.x0;
-        render_s0_l1(_enemy.x0, _enemy.y0, color);
-    }
-
-    if (shift_i == l_most) {
-        r_synch = 0;
-    } 
-    if (shift_i == r_most) {
-        r_synch = 1;
-    }
+    // if (shift_i == l_most) {
+    //     r_synch = 0;
+    // } 
+    // if (shift_i == r_most) {
+    //     r_synch = 1;
+    // }
 
     shift_i = (shift_i >= r_most) ? l_most : shift_i + 1;
     return 0;
@@ -787,9 +843,9 @@ uchar enemy_row::y_shift(void){
         enemies[i].y0 += 3*hitb_y;
         if (_enemy.x0 % 2 == 0){
             // conditional rendering.
-	        enemies[i].render0(cyan);
+	        enemies[i].render0(white);
         } else {
-            enemies[i].render1(blue);
+            enemies[i].render1(white);
         }
     }
     return 0;
