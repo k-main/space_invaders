@@ -27,7 +27,7 @@
 #define hitb_y 8
 #define shft_max_y 4
 #define enemies_per_row 11
-#define enemy_rows 2
+#define enemy_rows 1
 #define row_offst 21
 
 
@@ -180,14 +180,12 @@ int main(void) {
     barriers[2] = mkstruct(135, 165, 260, 284);
     barriers[3] = mkstruct(195, 225, 260, 284);
     const unsigned short enemy_start_y = 5*hitb_y;
-    rows[0] = new enemy_row(enemy_start_y,lvl_1,left); // writes directly to the screen
-    rows[1] = new enemy_row(enemy_start_y + 3*hitb_y, lvl_1,right);
-
-    // for (unsigned char i = 0; i < 4; i++){
-    //     // fillscr(240/i + 1,240/i + 1,0,max_y,red);
-    //     fillscr((i+1)*(240/4),(i+1)*(240/4),0,max_y,red);
-    // }
-    // fillscr(240/4,240/4,0,max_y,red);
+    dir enemy_dir = right;
+    
+    for (uchar i = 0; i < enemy_rows; i++){
+        rows[i] = new enemy_row(enemy_start_y + 3*i*hitb_y,lvl_1,enemy_dir);
+        enemy_dir = (enemy_dir == right) ? left : right;
+    }
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -421,21 +419,26 @@ uchar laser_struct::collision(){
             } else if (row_num == 0) drawcirc(x0,y0,dmg_rad,black);
         }
     }
-    // enemy collision
-    // for (short i = enemy_rows - 1; i >= 0; i--){
-    //     enemy _enemy = rows[i]->enemies[0];
-    //     if (rows[i]->hp == 0) continue;
-    //     if (_enemy.y0 + 2*hitb_y - y0 < 2*hitb_y) {
-    //         /* search
-    //         is making an enitre copy of the enemy row cheaper/faster than just accessing?
-    //          */
-    //         serial_println(x0);
-    //         short lmost_x0 = rows[i]->enemies[rows[i]->l_most].x0;
-    //         short rmost_x1 = rows[i]->enemies[rows[i]->r_most].x0 + 2*hitb_x;
-    //         short midpoint = (rmost_x1 / lmost_x0) / 2;
-            
-    //     }
-    // }
+    // player shooting at enemies
+
+    for (short i = enemy_rows - 1; i >= 0; i--){
+        if (!rows[i]->hp) continue;
+        enemy_row row = *rows[i];
+        enemy _enemy = row.enemies[row.r_most]; // doesnt matter, just need a valid one
+
+        if (!(_enemy.y0 + 2*hitb_y - y0 < 2*hitb_y)) continue;
+
+        short hit = map_value(row.enemies[row.l_most].x0, row.enemies[row.r_most].x0+2*hitb_x,0,enemies_per_row - 1,x0);
+        if (hit >= 11 || hit < 0) continue;
+        
+        enemy enemy_hit = rows[i]->enemies[hit];
+        serial_print("Hit : "); serial_println(hit);
+        if (enemy_hit.dead == 0){
+             rows[i]->enemies[hit].dead = 1;
+            (enemy_hit.x0 % 2 == 0) ? enemy_hit.render0(black) : enemy_hit.render1(black);
+        }
+    }
+    // todo: enemies shooting at player
     return 0;
 }
 
@@ -689,6 +692,7 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
         enemies[i].x1 = enemy_x0 + 2*hitb_x;
         enemies[i].y0 = y0;
         enemies[i].y1 = y0 + hitb_y;
+        enemies[i].dead = 0;
     }
     r_synch = 1;
     l_most = 0;
@@ -702,6 +706,11 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
 uchar enemy_row::x_shift(void){
 
     enemy _enemy = enemies[shift_i];
+    if (enemies[shift_i].dead == 1){
+        shift_i = (shift_i >= enemies_per_row - 1) ? 0 : shift_i + 1;
+        return 0;
+    }
+    
     uint color = (_enemy.x0 % 2 == 0) ? blue : cyan;
 
 
@@ -732,6 +741,7 @@ uchar enemy_row::y_shift(void){
     if (hp == 0) return 1;
     shift_i_y += 1;
     for (uchar i = l_most; i <= r_most; i++){
+        if (enemies[i].dead == 1) continue;
         enemy _enemy = enemies[i];
         fillscr(enemies[i].x0, enemies[i].x0+2*hitb_x, enemies[i].y0, enemies[i].y0+2*hitb_y, black);
         enemies[i].y0 += 3*hitb_y;
