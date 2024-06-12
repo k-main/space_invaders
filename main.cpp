@@ -25,9 +25,9 @@
 
 #define hitb_x 6
 #define hitb_y 8
-#define shft_max_y 2
+#define shft_max_y 4
 #define enemies_per_row 11
-#define enemy_rows 1
+#define enemy_rows 2
 #define row_offst 21
 
 
@@ -99,15 +99,17 @@ struct enemy : entity {
     uchar dead;
     void (*render_s0)(ushort, ushort, uint);
     void (*render_s1)(ushort, ushort, uint);
+    void render0(uint c);
+    void render1(uint c);
 };
 
 struct enemy_row {
     enemy enemies[enemies_per_row];
     dir shift_dir;
     uchar shift_i;
-    uchar shift_enemy_num;
     uchar shift_i_y;
     uchar l_most, r_most, r_synch;
+    uchar hp, shifted;
     enemy_row(ushort y0, enemy_type type, dir);
     void erase(uchar enemy_num);
     uchar x_shift(void);
@@ -156,7 +158,7 @@ const uchar LSR_MAX = 10;
 uchar LSR_CNT = 0;
 laser_struct* lasers[LSR_MAX];
 static_structure barriers[4];
-enemy_row* rows[1];
+enemy_row* rows[enemy_rows];
 
 // uchar barrier_num, hitbox_num;
 uchar row_num;
@@ -177,8 +179,15 @@ int main(void) {
     barriers[1] = mkstruct(75, 105, 260, 284);
     barriers[2] = mkstruct(135, 165, 260, 284);
     barriers[3] = mkstruct(195, 225, 260, 284);
+    const unsigned short enemy_start_y = 5*hitb_y;
+    rows[0] = new enemy_row(enemy_start_y,lvl_1,left); // writes directly to the screen
+    rows[1] = new enemy_row(enemy_start_y + 3*hitb_y, lvl_1,right);
 
-    rows[0] = new enemy_row(100,lvl_1,right); // writes directly to the screen
+    // for (unsigned char i = 0; i < 4; i++){
+    //     // fillscr(240/i + 1,240/i + 1,0,max_y,red);
+    //     fillscr((i+1)*(240/4),(i+1)*(240/4),0,max_y,red);
+    // }
+    // fillscr(240/4,240/4,0,max_y,red);
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -200,7 +209,7 @@ int main(void) {
     tasks[3].elapsedTime = 1;
     tasks[3].TickFct = &tick_player;
 
-    tasks[4].period = 5;
+    tasks[4].period = 50;
     tasks[4].state = update;
     tasks[4].elapsedTime = 1;
     tasks[4].TickFct = &tick_enemies;
@@ -406,13 +415,27 @@ uchar laser_struct::collision(){
             row_num = map_value(barriers[0].y0, barriers[0].y1 + 1,0,3,leading_px);
             if (barriers[barrier_num].hitbox[hitbox_num + 10*arr_offst + row_coeff*5*row_num].hit == 0){
                 barriers[barrier_num].hitbox[hitbox_num + 10*arr_offst + row_coeff*5*row_num].hit = 1;
-                drawcirc(x0,leading_px,dmg_rad,black);
+                drawcirc(x0,leading_px,dmg_rad,black); // replace with dmg sprite
                 erase();
                 dead = 1;
             } else if (row_num == 0) drawcirc(x0,y0,dmg_rad,black);
         }
     }
     // enemy collision
+    // for (short i = enemy_rows - 1; i >= 0; i--){
+    //     enemy _enemy = rows[i]->enemies[0];
+    //     if (rows[i]->hp == 0) continue;
+    //     if (_enemy.y0 + 2*hitb_y - y0 < 2*hitb_y) {
+    //         /* search
+    //         is making an enitre copy of the enemy row cheaper/faster than just accessing?
+    //          */
+    //         serial_println(x0);
+    //         short lmost_x0 = rows[i]->enemies[rows[i]->l_most].x0;
+    //         short rmost_x1 = rows[i]->enemies[rows[i]->r_most].x0 + 2*hitb_x;
+    //         short midpoint = (rmost_x1 / lmost_x0) / 2;
+            
+    //     }
+    // }
     return 0;
 }
 
@@ -507,6 +530,8 @@ int tick_player(int state){
     if (fire_req == 1){
         fire_ack = 1;
         mklaser(player.fire_pos, player.y0 - 14, up, player.laser_color);
+        // serial_print("Laser at : ");
+        // serial_println(player.fire_pos);
     } else {
         fire_ack = 0;
     }
@@ -638,6 +663,14 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
     return structure;
 }
 
+void enemy::render0(uint c){
+    render_s0(x0,y0,c);
+}
+
+void enemy::render1(uint c){
+    render_s1(x0,y0,c);
+}
+
 void render_s0_l1(ushort x0, ushort y0, uint color){
     fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
 }
@@ -650,6 +683,8 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     for (unsigned char i = 0; i < enemies_per_row; i++){
         unsigned char enemy_x0 = row_offst + 3*i*hitb_x;
         render_s0_l1(enemy_x0, y0, blue);
+        enemies[i].render_s0 = &render_s0_l1;
+        enemies[i].render_s1 = &render_s1_l1;
         enemies[i].x0 = enemy_x0;
         enemies[i].x1 = enemy_x0 + 2*hitb_x;
         enemies[i].y0 = y0;
@@ -658,9 +693,9 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     r_synch = 1;
     l_most = 0;
     r_most = enemies_per_row - 1;
+    hp = enemies_per_row; // on hit, decriment
     shift_dir = enemy_dir;
     shift_i = 0;
-    shift_enemy_num = 0;
     shift_i_y = 0;
 }
 
@@ -694,36 +729,46 @@ uchar enemy_row::x_shift(void){
 }
 
 uchar enemy_row::y_shift(void){
-    for (uchar i = 0; i < enemies_per_row; i++){
+    if (hp == 0) return 1;
+    shift_i_y += 1;
+    for (uchar i = l_most; i <= r_most; i++){
         enemy _enemy = enemies[i];
-        // eraase the enemy
-        if (enemies[i].x0 % 2) {
-            render_s0_l1(_enemy.x0, _enemy.y0, black);
-        } else {
-            render_s1_l1(_enemy.x0, _enemy.y0, black);
-        }
+        fillscr(enemies[i].x0, enemies[i].x0+2*hitb_x, enemies[i].y0, enemies[i].y0+2*hitb_y, black);
         enemies[i].y0 += 3*hitb_y;
-        if (enemies[i].x0 % 2) {
-            render_s0_l1(_enemy.x0, _enemy.y0, blue);
+        if (_enemy.x0 % 2 == 0){
+            // conditional rendering.
+	        enemies[i].render0(cyan);
         } else {
-            render_s1_l1(_enemy.x0, _enemy.y0, cyan);
+            enemies[i].render1(blue);
         }
-        shift_i_y += 1;
     }
-    
-
     return 0;
 }
 
 int tick_enemies(int state){
-    for (uchar i = 0; i < enemy_rows; i++){
+    for (short i = enemy_rows - 1; i >= 0; i--){
+        /* shifting */
         enemy_row row = *rows[i];
-        if (row.enemies[row.l_most].x0 <= hitb_x || row.enemies[row.r_most].x0 + 2*hitb_x >= max_x - hitb_x){
+        if (row.enemies[row.l_most].x0 <= hitb_x || row.enemies[row.r_most].x0 + 2*hitb_x >= max_x - hitb_x){ // bounds check
             if (row.r_synch == 1) {
-                rows[i]->shift_dir = (rows[i]->shift_dir == right) ? left : right;
+                if (rows[i]->shift_i_y < shft_max_y) {
+                    if (i == enemy_rows - 1) {
+                        rows[i]->shift_dir = (rows[i]->shift_dir == right) ? left : right;
+                        rows[i]->y_shift();
+                    } else if (rows[i + 1]->shift_i_y > rows[i]->shift_i_y){
+                         // second check to avoid invalid array access.
+                        rows[i]->shift_dir = (rows[i]->shift_dir == right) ? left : right;
+                        rows[i]->y_shift();
+                    }
+                } else {
+                    rows[i]->shift_dir = (rows[i]->shift_dir == right) ? left : right;
+                }
+                // continue;
             }
         }
         rows[i]->x_shift();
+        /* collision */
+
     }
     return state;
 }
