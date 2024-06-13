@@ -12,6 +12,8 @@
 #define player_step 3
 /* colors */
 #define red   0xF800
+#define b_red 0xE691
+#define yellow 0xffe0
 #define green 0x07E0
 #define blue  0x001f
 #define cyan 0x07ff
@@ -110,7 +112,7 @@ struct enemy_row {
     uchar shift_i;
     uchar shift_i_y;
     uchar l_most, r_most, r_synch;
-    uchar hp, shifted;
+    uchar hp, shoot_f;
     enemy_row(ushort y0, enemy_type type, dir);
     void erase(uchar enemy_num);
     void set_rmost(void);
@@ -158,14 +160,17 @@ int tick_mv(int state);
 int tick_fire(int state);
 int tick_player(int state);
 int tick_enemies(int state);
+ushort tick_enemies_c = 0;
 
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
 player_entity player;
 const uchar LSR_MAX = 10;
 uchar LSR_CNT = 0;
+uint shoot_i = 5;
 laser_struct* lasers[LSR_MAX];
 static_structure barriers[4];
 enemy_row* rows[enemy_rows];
+
 
 // uchar barrier_num, hitbox_num;
 uchar row_num;
@@ -181,7 +186,7 @@ int main(void) {
     serial_init(9600);
     /* initialization */
     initlcd();
-    renderplayer(105, 300, white, cyan);
+    renderplayer(105, 300, white, blue);
     barriers[0] = mkstruct(15, 45, 260, 284);
     barriers[1] = mkstruct(75, 105, 260, 284);
     barriers[2] = mkstruct(135, 165, 260, 284);
@@ -828,19 +833,22 @@ void render_s1_l3(ushort x0, ushort y0, uint color){
 enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     void (*render_0)(ushort, ushort, uint);
     void (*render_1)(ushort, ushort, uint);
-
+    uint lsr_color;
     switch(enemy){
         case lvl_1:
             render_0 = render_s0_l1;
             render_1 = render_s1_l1;
+            lsr_color = red;
         break;
         case lvl_2:
             render_0 = render_s0_l2;
             render_1 = render_s1_l2;
+            lsr_color = red;
         break;
         case lvl_3:
             render_0 = render_s0_l3;
             render_1 = render_s1_l3;
+            lsr_color = red;
         break;
     }
 
@@ -854,6 +862,7 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
         enemies[i].y0 = y0;
         enemies[i].y1 = y0 + hitb_y;
         enemies[i].dead = 0;
+        enemies[i].laser_color = lsr_color;
     }
     r_synch = 1;
     l_most = 0;
@@ -862,6 +871,7 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     shift_dir = enemy_dir;
     shift_i = 0;
     shift_i_y = 0;
+    shoot_f = 0;
 }
 
 void enemy_row::set_lmost(void){
@@ -899,7 +909,12 @@ uchar enemy_row::x_shift(void){
     r_synch = (shift_i == l_most) ? 0 : r_synch;
     r_synch = (shift_i == r_most) ? 1 : r_synch;
 
+    
     shift_i = (shift_i >= r_most) ? l_most : shift_i + 1;
+    if (shoot_f == 1) {
+        mklaser(_enemy.x0 + hitb_x, _enemy.y0 + 2*hitb_y, down, _enemy.laser_color);
+        shoot_f = 0;
+    }
     return 0;
 }
 
@@ -921,7 +936,22 @@ uchar enemy_row::y_shift(void){
     return 0;
 }
 
+uint randint(void){
+    uchar randint = (ADC_read(4) - 950) * (ADC_read(3) - 950);
+    randint = map_value(0,256,0,4,randint);
+    return randint;
+}
+
 int tick_enemies(int state){
+    tick_enemies_c += 1;
+    if (tick_enemies_c > 20){
+        tick_enemies_c = 0;
+        uint rint = randint();
+        rint = (rint > enemy_rows - 1) ? enemy_rows  - 1 : rint;
+        rows[rint]->shoot_f = 1;
+    }
+
+    
     for (short i = enemy_rows - 1; i >= 0; i--){
         /* shifting */
         enemy_row row = *rows[i];
