@@ -27,7 +27,7 @@
 #define hitb_y 8
 #define shft_max_y 4
 #define enemies_per_row 11
-#define enemy_rows 0
+#define enemy_rows 4
 #define row_offst 21
 
 
@@ -149,6 +149,8 @@ void render_s0_l1(ushort x0, ushort y0, uint color);
 void render_s1_l1(ushort x0, ushort y0, uint color);
 void render_s0_l2(ushort x0, ushort y0, uint color);
 void render_s1_l2(ushort x0, ushort y0, uint color);
+void render_s0_l3(ushort x0, ushort y0, uint color);
+void render_s1_l3(ushort x0, ushort y0, uint color);
 uchar setpx(ushort x, ushort y, uint color);
 
 int tick_lasers(int state);
@@ -187,13 +189,26 @@ int main(void) {
     const unsigned short enemy_start_y = 5*hitb_y;
     dir enemy_dir = right;
     
+        enemy_type type;
     for (uchar i = 0; i < enemy_rows; i++){
-        rows[i] = new enemy_row(enemy_start_y + 3*i*hitb_y,lvl_1,enemy_dir);
+        switch (i){
+            case 0:
+                type = lvl_1;
+            break;
+            case 1:
+                type = lvl_2;
+            break;
+            default:
+                type = lvl_3;
+            break;
+        }
+        rows[i] = new enemy_row(enemy_start_y + 3*i*hitb_y,type,enemy_dir);
         enemy_dir = (enemy_dir == right) ? left : right;
     }
 
-    // render_s0_l1(100,100,white);
-    // render_s1_l1(120,100,white);
+
+    // render_s0_l3(100,100,white);
+    // render_s1_l3(100 + 3*hitb_x, 100, white);
 
     tasks[0].period = 5;
     tasks[0].state = update;
@@ -693,7 +708,7 @@ static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1){
 
 void enemy::perish(void){
     // (x0 % 2 == 0) ? render0(black) : render1(black);
-    fillscr(x0, x0+2*hitb_x,y0,y0+2*hitb_y,black);
+    fillscr(x0, x0+2*hitb_x,y0,y0+2*hitb_y + 2,black);
     dead = 1;
 }
 
@@ -705,7 +720,7 @@ void enemy::render1(uint c){
     render_s1(x0,y0,c);
 }
 
-void render_s0_l1(ushort x0, ushort y0, uint color){
+void render_s0_l2(ushort x0, ushort y0, uint color){
     // fillscr(x0, x0 + 2*hitb_x, y0, y0+2*hitb_y, color);
     ushort x0plus2hb = x0 + 2*hitb_x;
     ushort y0plus6 = y0 + 6;
@@ -727,7 +742,7 @@ void render_s0_l1(ushort x0, ushort y0, uint color){
     setpx(x0plus2hb - 1 - hbdiv2, y0 + 2, color); setpx(x0plus2hb - 1 - hbdiv2 + 1, y0 + 1, color);
 }
 
-void render_s1_l1(ushort x0, ushort y0, uint color){
+void render_s1_l2(ushort x0, ushort y0, uint color){
     ushort x0plus2hb = x0 + 2*hitb_x;
     ushort hbdiv2 = hitb_x >> 1;
     fillscr(x0 + 1, x0plus2hb - 1, y0 + 3, y0 + 3 + hitb_y, color); 
@@ -749,6 +764,66 @@ void render_s1_l1(ushort x0, ushort y0, uint color){
     fillscr(x0plus2hb - hbdiv2 + 1, x0plus2hb - hbdiv2 + 3, y0 + 5 + hitb_y, y0 + 5 + hitb_y, color);
 }
 
+void render_s0_l1(ushort x0, ushort y0, uint color){
+    short start = x0, end = start + 12;
+    fillscr(start,end,y0+hitb_x+2,y0+hitb_x+5,white);
+    fillscr(start + 1, end - 1,y0 + hitb_x + 6, y0 + hitb_x + 7, white);
+    fillscr(start,start,y0 + hitb_x + 6, y0 + hitb_x + 9, white); fillscr(start+1,start+1,y0 + hitb_x + 9, y0 + hitb_x + 12, white);
+    fillscr(end,end,y0 + hitb_x + 6, y0 + hitb_x + 9, white); fillscr(end - 1, end - 1, y0 + hitb_x + 9, y0 + hitb_x + 12, white);
+    fillscr(start + 4, start + 8, y0+hitb_x+6, y0+hitb_x+8, white);
+    for (uchar i = 0; i < 6; i++){
+        fillscr(start,end,y0 + hitb_y-i,y0 + hitb_y-i,white);
+        start += 1;
+        end -= 1;
+    }
+    fillscr(start + 2, start + 4, y0 + hitb_x + 3, y0 + hitb_x + 4, black);
+    fillscr(end - 4, end -2, y0 + hitb_x + 3, y0 + hitb_x + 4, black);
+}
+
+void render_s1_l1(ushort x0, ushort y0, uint color){
+    short start = x0, end = start + 12;
+    fillscr(start,end,y0+hitb_x+2,y0+hitb_x+5,white);
+    fillscr(start + 1, end - 1,y0 + hitb_x + 6, y0 + hitb_x + 7, white);
+
+    fillscr(start + 3, start + 3, y0 + hitb_x + 6, y0 + hitb_x + 10, white); fillscr(start + 4, start + 4, y0 + hitb_x + 10, y0 + hitb_x + 12, white);
+    fillscr(end - 3, end - 3, y0 + hitb_x + 6, y0 + hitb_x + 10, white); fillscr(end - 4, end - 4, y0 + hitb_x + 10, y0 + hitb_x + 12, white);
+
+    
+    fillscr(start + 4, start + 8, y0+hitb_x+6, y0+hitb_x+8, white);
+    for (uchar i = 0; i < 6; i++){
+        fillscr(start,end,y0 + hitb_y-i,y0 + hitb_y-i,white);
+        start += 1;
+        end -= 1;
+    }
+    fillscr(start + 2, start + 4, y0 + hitb_x + 3, y0 + hitb_x + 4, black);
+    fillscr(end - 4, end -2, y0 + hitb_x + 3, y0 + hitb_x + 4, black);
+}
+
+void render_s0_l3(ushort x0, ushort y0, uint color){
+    fillscr(x0 + 2, x0 + 2*hitb_x - 2, y0 +  hitb_y - 2, y0 + hitb_y, white);
+    fillscr(x0, x0 + 2*hitb_x, y0 + hitb_y, y0 + hitb_y + 2, white);
+    // setpx(x0 + 4, y0 + hitb_y + 1, black);
+    fillscr(x0 + 4, x0 + 8, y0 + hitb_y + 1, y0 + hitb_y + 2, black);
+    fillscr(x0 + 2, x0 + 2*hitb_x - 2, y0 + hitb_y + 3, y0 + hitb_y + 4, white);
+    fillscr(x0 + 2, x0 + 4, y0 + hitb_y + 5, y0 + hitb_y + 6, white);
+    fillscr(x0 + 3, x0 + 4, y0 + hitb_y + 6, y0 + hitb_y + 8, white);
+    fillscr(x0 + 2*hitb_x - 4, x0 + 2*hitb_x - 2, y0 + hitb_y + 5, y0 + hitb_y + 6, white);
+    fillscr(x0 + 2*hitb_x - 4, x0 + 2*hitb_x - 3, y0 + hitb_y + 6, y0 + hitb_y + 8, white);
+    // fillscr(x0 + 2, )
+}
+
+void render_s1_l3(ushort x0, ushort y0, uint color){
+    fillscr(x0 + 2, x0 + 2*hitb_x - 2, y0 +  hitb_y - 2, y0 + hitb_y, white);
+    fillscr(x0, x0 + 2*hitb_x, y0 + hitb_y, y0 + hitb_y + 2, white);
+    // setpx(x0 + 4, y0 + hitb_y + 1, black);
+    fillscr(x0 + 4, x0 + 8, y0 + hitb_y + 1, y0 + hitb_y + 2, black);
+    fillscr(x0 + 2, x0 + 2*hitb_x - 2, y0 + hitb_y + 3, y0 + hitb_y + 4, white);
+    fillscr(x0 + 2, x0 + 4, y0 + hitb_y + 5, y0 + hitb_y + 6, white);
+    fillscr(x0 + 1, x0 + 2, y0 + hitb_y + 6, y0 + hitb_y + 8, white);
+    fillscr(x0 + 2*hitb_x - 4, x0 + 2*hitb_x - 2, y0 + hitb_y + 5, y0 + hitb_y + 6, white);
+    fillscr(x0 + 2*hitb_x - 2, x0 + 2*hitb_x - 1, y0 + hitb_y + 6, y0 + hitb_y + 8, white);
+    // fillscr(x0 + 2, )
+}
 
 enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
     void (*render_0)(ushort, ushort, uint);
@@ -760,10 +835,12 @@ enemy_row::enemy_row(ushort y0, enemy_type enemy, dir enemy_dir){
             render_1 = render_s1_l1;
         break;
         case lvl_2:
-        
+            render_0 = render_s0_l2;
+            render_1 = render_s1_l2;
         break;
         case lvl_3:
-
+            render_0 = render_s0_l3;
+            render_1 = render_s1_l3;
         break;
     }
 
@@ -791,7 +868,7 @@ void enemy_row::set_lmost(void){
     for (short i = l_most; i < enemies_per_row; i++){
         if (enemies[i].dead == 0){
             l_most = i;
-            serial_print("l_most is now : "); serial_println(l_most);
+            // serial_print("l_most is now : "); serial_println(l_most);
             break;
         }
     }
@@ -801,7 +878,7 @@ void enemy_row::set_rmost(void){
     for (short i = r_most; i >= 0; i--){
         if (enemies[i].dead == 0){
             r_most = i;
-            serial_print("r_most is now : "); serial_println(r_most);
+            // serial_print("r_most is now : "); serial_println(r_most);
             break;
         }
     }
@@ -815,19 +892,12 @@ uchar enemy_row::x_shift(void){
         return 0;
     }
     
-    fillscr(_enemy.x0,_enemy.x0 + 2*hitb_x, _enemy.y0, _enemy.y0 + 2*hitb_y, black); // erase   
+    fillscr(_enemy.x0,_enemy.x0 + 2*hitb_x, _enemy.y0, _enemy.y0 + 2*hitb_y + 2, black); // erase   
     _enemy.x0 = (shift_dir == right) ? _enemy.x0 + 1 : _enemy.x0 - 1;                // shift
     enemies[shift_i].x0 = _enemy.x0;                                                 // reassign
     (_enemy.x0 % 2 == 0) ? _enemy.render0(white) : _enemy.render1(white);              // re render
     r_synch = (shift_i == l_most) ? 0 : r_synch;
     r_synch = (shift_i == r_most) ? 1 : r_synch;
-
-    // if (shift_i == l_most) {
-    //     r_synch = 0;
-    // } 
-    // if (shift_i == r_most) {
-    //     r_synch = 1;
-    // }
 
     shift_i = (shift_i >= r_most) ? l_most : shift_i + 1;
     return 0;
@@ -839,7 +909,7 @@ uchar enemy_row::y_shift(void){
     for (uchar i = l_most; i <= r_most; i++){
         if (enemies[i].dead == 1) continue;
         enemy _enemy = enemies[i];
-        fillscr(enemies[i].x0, enemies[i].x0+2*hitb_x, enemies[i].y0, enemies[i].y0+2*hitb_y, black);
+        fillscr(enemies[i].x0, enemies[i].x0+2*hitb_x, enemies[i].y0, enemies[i].y0+2*hitb_y + 2, black);
         enemies[i].y0 += 3*hitb_y;
         if (_enemy.x0 % 2 == 0){
             // conditional rendering.
