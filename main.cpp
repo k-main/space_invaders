@@ -178,6 +178,8 @@ void render_s0_l2(ushort x0, ushort y0, uint color);
 void render_s1_l2(ushort x0, ushort y0, uint color);
 void render_s0_l3(ushort x0, ushort y0, uint color);
 void render_s1_l3(ushort x0, ushort y0, uint color);
+void writechar(ushort x0, ushort y0, char c);
+void writestr(ushort x0, ushort y0, char* str);
 uchar setpx(ushort x, ushort y, uint color);
 uint randint(void);
 
@@ -222,6 +224,9 @@ int main(void) {
     initlcd();
     game.reset();
 
+    // writechar(100,100,'D');
+    writestr(100,100, "PTS");
+
     tasks[0].period = 100;
     tasks[0].state = live;
     tasks[0].elapsedTime = 1;
@@ -265,6 +270,81 @@ int main(void) {
 }
 
 /* function definitions */
+
+void writechar(ushort x0, ushort y0, char c){
+    uchar char_width = 6;
+    uchar char_height = 12;
+    switch(c){
+        case 'A':
+            fillscr(x0, x0, y0, y0 + char_height,white); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
+            fillscr(x0,x0 + char_width,y0,y0,white); // top
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            // fillscr(x0,x0 + 4,y0 + char_height, y0 + char_height, white); // bottom
+        break;
+        case 'B':
+
+        break;
+        case 'U':
+            fillscr(x0, x0, y0, y0 + char_height,white); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
+            // fillscr(x0,x0 + char_width,y0,y0,white); // top
+            // fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, white); // bottom
+        break;
+        case 'I':
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,white); // left
+        break;
+        case 'E':
+            fillscr(x0, x0, y0, y0 + char_height,white); // left
+            // fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
+            fillscr(x0,x0 + char_width,y0,y0,white); // top
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, white); // bottom
+        break;
+        case 'D':
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            fillscr(x0,x0 + 4,y0 + char_height, y0 + char_height, white); // bottom
+            fillscr(x0, x0, y0 + char_height/2, y0 + char_height,white); // left
+        break;
+        case 'H':
+            fillscr(x0, x0, y0, y0 + char_height,white); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+        break;
+        case 'P':
+            fillscr(x0, x0, y0, y0 + char_height,white); // left
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height/2, white); // right
+            fillscr(x0,x0 + char_width,y0,y0,white); // top
+        break;
+        case 'T':
+            fillscr(x0,x0 + char_width,y0,y0,white); // top
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,white); // left
+        break;
+        case 'S':
+            fillscr(x0,x0 + char_width,y0,y0,white); // top
+            fillscr(x0, x0, y0, y0 + char_height/2,white); // left top
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            fillscr(x0 + char_width, x0 + char_width, y0 + char_height/2, y0 + char_height, white); // bottom right
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, white); // bottom
+        break;
+    } 
+}
+
+void writestr(ushort x0, ushort y0, char* str){
+    ushort char_num = 0;
+    ushort start = x0;
+    // char c = ' ';
+    while(str[char_num] != '\0'){
+        // serial_println(str[char_num]);
+        if (str[char_num] != ' ') writechar(start, y0, str[char_num]);
+        start += 10;
+        char_num += 1;
+
+    }
+}
 
 void sendcmd(uchar index)
 {
@@ -1059,12 +1139,12 @@ void game_state::d_lives(void){
 void game_state::render_lives(void){
     // clear previously displayed lives
 
-    fillscr(2*hitb_x,4*hitb_x + 3*3*hitb_x, max_y - 2*hitb_y - 4, max_y - hitb_y, black);
-
+    fillscr(6*hitb_x,8*hitb_x + 3*3*hitb_x, max_y - 2*hitb_y - 4, max_y - hitb_y, black);
+    writestr(hitb_x, max_y -2*hitb_y, "HP ");
     // display current lives
     for (int i = 0; i < lives; i++){
-        fillscr(2*hitb_x + i*3*hitb_x, 4*hitb_x + i*3*hitb_x, max_y - 2*hitb_y, max_y - hitb_y, white);
-        fillscr(2*hitb_x + 4 + i*3*hitb_x, 2*hitb_x + 8 + i*3*hitb_x, max_y - 2*hitb_y - 2, max_y - 2*hitb_y, white);
+        fillscr(6*hitb_x + i*3*hitb_x, 8*hitb_x + i*3*hitb_x, max_y - 2*hitb_y, max_y - hitb_y, white);
+        fillscr(6*hitb_x + 4 + i*3*hitb_x, 6*hitb_x + 8 + i*3*hitb_x, max_y - 2*hitb_y - 2, max_y - 2*hitb_y, white);
         fillscr(0,max_x, max_y - 3*hitb_y, max_y - 3*hitb_y, white);
     }
 }
