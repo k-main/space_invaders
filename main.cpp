@@ -10,6 +10,7 @@
 #define player_w 20
 #define player_h 10
 #define player_step 3
+
 /* colors */
 #define red   0xF800
 #define b_red 0xE691
@@ -29,13 +30,14 @@
 #define hitb_y 8
 #define shft_max_y 4
 #define enemies_per_row 11
-#define enemy_rows 4
+#define enemy_start_y 5*hitb_y
+#define enemy_rows 0
 #define row_offst 21
 
 
 #define dmg_rad 7
 
-#define NUM_TASKS 5
+#define NUM_TASKS 6
 
 
 //Task struct for concurrent synchSMs implmentations
@@ -64,6 +66,11 @@ void TimerISR() {
 /* i do not like capital letters */
 
 /* state enums */
+
+enum program_state {
+    menu,live,reset,halt
+};
+
 enum lsr_state{
     update
 };
@@ -93,8 +100,11 @@ struct entity {
     uint color, laser_color;
 };
 
-struct player_entity : entity { 
+struct player : entity { 
     ushort gunx0, gunx1, guny0, guny1;
+    ushort lives;
+    // player(ushort x0, ushort y0);
+    // void render(ushort x0, ushort y0, uint player_color, uint laser_color);
 };
 
 struct enemy : entity {
@@ -132,6 +142,21 @@ struct static_structure {
     hitbox_ss hitbox[15];
 };
 
+struct game_state {
+    uint score;
+    uint enemy_c;
+    int lives;
+    program_state state;
+    game_state();
+    void reset(void);
+    void i_score(void);
+    void render_score(void);
+
+    void i_lives(void);
+    void d_lives(void);
+    void render_lives(void);
+};
+
 uchar mv_l = 0, mv_r = 0, fire_req = 0, fire_ack;
 
 void sendcmd(uchar index);
@@ -154,16 +179,23 @@ void render_s1_l2(ushort x0, ushort y0, uint color);
 void render_s0_l3(ushort x0, ushort y0, uint color);
 void render_s1_l3(ushort x0, ushort y0, uint color);
 uchar setpx(ushort x, ushort y, uint color);
+uint randint(void);
 
 int tick_lasers(int state);
 int tick_mv(int state);
 int tick_fire(int state);
 int tick_player(int state);
 int tick_enemies(int state);
+int tick_gamestate(int state);
+
 ushort tick_enemies_c = 0;
+ushort tick_halt_c = 0;
 
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
-player_entity player;
+
+player player1;
+
+
 const uchar LSR_MAX = 10;
 uchar LSR_CNT = 0;
 uint shoot_i = 5;
@@ -171,6 +203,8 @@ laser_struct* lasers[LSR_MAX];
 static_structure barriers[4];
 enemy_row* rows[enemy_rows];
 
+// MASTER GAMESTATE
+game_state game = game_state();
 
 // uchar barrier_num, hitbox_num;
 uchar row_num;
@@ -186,59 +220,38 @@ int main(void) {
     serial_init(9600);
     /* initialization */
     initlcd();
-    renderplayer(105, 300, white, blue);
-    barriers[0] = mkstruct(15, 45, 260, 284);
-    barriers[1] = mkstruct(75, 105, 260, 284);
-    barriers[2] = mkstruct(135, 165, 260, 284);
-    barriers[3] = mkstruct(195, 225, 260, 284);
-    const unsigned short enemy_start_y = 5*hitb_y;
-    dir enemy_dir = right;
-    
-        enemy_type type;
-    for (uchar i = 0; i < enemy_rows; i++){
-        switch (i){
-            case 0:
-                type = lvl_1;
-            break;
-            case 1:
-                type = lvl_2;
-            break;
-            default:
-                type = lvl_3;
-            break;
-        }
-        rows[i] = new enemy_row(enemy_start_y + 3*i*hitb_y,type,enemy_dir);
-        enemy_dir = (enemy_dir == right) ? left : right;
-    }
+    game.reset();
 
+    tasks[0].period = 100;
+    tasks[0].state = live;
+    tasks[0].elapsedTime = 1;
+    tasks[0].TickFct = &tick_gamestate;
 
-    // render_s0_l3(100,100,white);
-    // render_s1_l3(100 + 3*hitb_x, 100, white);
-
-    tasks[0].period = 5;
-    tasks[0].state = update;
-    tasks[0].elapsedTime = 0;
-    tasks[0].TickFct = &tick_lasers;
-
-    tasks[1].period = 20;
-    tasks[1].state = wait;
+    tasks[1].period = 5;
+    tasks[1].state = update;
     tasks[1].elapsedTime = 1;
-    tasks[1].TickFct = &tick_mv;
+    tasks[1].TickFct = &tick_lasers;
 
     tasks[2].period = 20;
     tasks[2].state = wait;
     tasks[2].elapsedTime = 1;
-    tasks[2].TickFct = &tick_fire;
+    tasks[2].TickFct = &tick_mv;
 
-    tasks[3].period = 30;
+    tasks[3].period = 20;
     tasks[3].state = wait;
     tasks[3].elapsedTime = 1;
-    tasks[3].TickFct = &tick_player;
+    tasks[3].TickFct = &tick_fire;
 
-    tasks[4].period = 50;
-    tasks[4].state = update;
+    tasks[4].period = 30;
+    tasks[4].state = wait;
     tasks[4].elapsedTime = 1;
-    tasks[4].TickFct = &tick_enemies;
+    tasks[4].TickFct = &tick_player;
+
+    tasks[5].period = 50;
+    tasks[5].state = update;
+    tasks[5].elapsedTime = 1;
+    tasks[5].TickFct = &tick_enemies;
+
     
     TimerSet(GCD_PERIOD);
     TimerOn();
@@ -446,7 +459,7 @@ uchar laser_struct::collision(){
             } else if (row_num == 0) drawcirc(x0,y0,dmg_rad,black);
         }
     }
-    // player shooting at enemies
+    // player1 shooting at enemies
 
     short hit;
     if (ldir == up){
@@ -482,7 +495,15 @@ uchar laser_struct::collision(){
     } else {
         
     }
-    // todo: enemies shooting at player
+    // todo: enemies shooting at player1
+    if (player1.y1 - y1 < player_h) {
+        if (x0 > player1.x0 && x0 < player1.x1) {
+            //  serial_print(randint()); serial_print(" "); serial_println("player1 hit");
+            erase();
+            game.d_lives(); // decriment lives;
+            serial_println(game.lives);
+        }
+    }
     return 0;
 }
 
@@ -492,6 +513,7 @@ void laser_struct::mvlaser(){
     switch(ldir){
         case down:
             dead = (setpx(x0,laggingpx,black) == 1) ? 1 : 0;
+            if (leadingpx > max_y - 3*hitb_y - 4) erase();
             if (dead) break;
             y0 += 1;
             y1 += 1;
@@ -528,6 +550,7 @@ void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color){
 }
 
 int tick_mv(int state){
+    if (game.state == halt) return state;
     ushort leftbtn = ADC_read(0), rightbtn = ADC_read(1);
 
     switch(state){
@@ -554,6 +577,7 @@ int tick_mv(int state){
 }
 
 int tick_fire(int state){
+    if (game.state == halt) return state;
     ushort firebtn = ADC_read(2);
     fire_req = (fire_ack == 1) ? 0 : fire_req;
     switch(state){
@@ -574,21 +598,22 @@ int tick_fire(int state){
 }
 
 int tick_player(int state){
+    if (game.state == halt) return state;
     if (fire_req == 1){
         fire_ack = 1;
-        mklaser(player.fire_pos, player.y0 - 14, up, player.laser_color);
+        mklaser(player1.fire_pos, player1.y0 - 14, up, player1.laser_color);
         // serial_print("Laser at : ");
-        // serial_println(player.fire_pos);
+        // serial_println(player1.fire_pos);
     } else {
         fire_ack = 0;
     }
     if (mv_l == 1) {
-        if (player.x0 - player_step > 0){
+        if (player1.x0 - player_step > 0){
             mvplayer(player_step, left);
         }
     }
     if (mv_r == 1){
-        if (player.x1 + player_step < max_x){
+        if (player1.x1 + player_step < max_x){
             mvplayer(player_step, right); 
         }
     }
@@ -597,19 +622,19 @@ int tick_player(int state){
 }
 
 void renderplayer(ushort x0, ushort y0, uint color, uint laser_color){
-    player.x0 = x0; 
-    player.x1 = x0 + player_w;
-    player.y0 = y0; 
-    player.y1 = y0 + player_h; 
-    player.fire_pos = x0 + (player_w / 2);
-    player.laser_color = laser_color;
-    player.color = color;
+    player1.x0 = x0; 
+    player1.x1 = x0 + player_w;
+    player1.y0 = y0; 
+    player1.y1 = y0 + player_h; 
+    player1.fire_pos = x0 + (player_w / 2);
+    player1.laser_color = laser_color;
+    player1.color = color;
     // for his lil gun
-    player.gunx0 = x0 + (player_w / 2) - 2;
-    player.gunx1 = player.gunx0 + 4;
-    player.guny0 = y0 - 3;
-    player.guny1 = y0;
-    fillscr(player.gunx0, player.gunx1, player.guny0, player.guny1, color);
+    player1.gunx0 = x0 + (player_w / 2) - 2;
+    player1.gunx1 = player1.gunx0 + 4;
+    player1.guny0 = y0 - 3;
+    player1.guny1 = y0;
+    fillscr(player1.gunx0, player1.gunx1, player1.guny0, player1.guny1, color);
     fillscr(x0, x0 + player_w, y0, y0 + player_h, color);
 }
 
@@ -617,29 +642,29 @@ void mvplayer(uchar step_amt, dir direction){
     switch(direction){
         case left:
             /* erase rightmost columns */
-            fillscr((player.x1 - step_amt), player.x1, player.y0, player.y1, black);
-            fillscr((player.gunx1 - step_amt), player.gunx1, player.guny0, player.guny1, black);
-            player.x1 -= step_amt;
-            player.gunx1 -= step_amt;
+            fillscr((player1.x1 - step_amt), player1.x1, player1.y0, player1.y1, black);
+            fillscr((player1.gunx1 - step_amt), player1.gunx1, player1.guny0, player1.guny1, black);
+            player1.x1 -= step_amt;
+            player1.gunx1 -= step_amt;
             /* write leftmost columns */
-            fillscr(player.x0 - step_amt, player.x0, player.y0 + 1, player.y1, white);
-            fillscr(player.gunx0 - step_amt, player.gunx0, player.guny0, player.guny1, white);
-            player.x0 -= step_amt;
-            player.gunx0 -= step_amt;
-            player.fire_pos -= step_amt;
+            fillscr(player1.x0 - step_amt, player1.x0, player1.y0 + 1, player1.y1, white);
+            fillscr(player1.gunx0 - step_amt, player1.gunx0, player1.guny0, player1.guny1, white);
+            player1.x0 -= step_amt;
+            player1.gunx0 -= step_amt;
+            player1.fire_pos -= step_amt;
         break;
         case right:
             /*write rightmost columns*/
-            fillscr(player.x1, (player.x1 + step_amt), player.y0 + 1, player.y1, white);
-            fillscr(player.gunx1, (player.gunx1 + step_amt), player.guny0, player.guny1, white);
-            player.x1 += step_amt;
-            player.gunx1 += step_amt;
+            fillscr(player1.x1, (player1.x1 + step_amt), player1.y0 + 1, player1.y1, white);
+            fillscr(player1.gunx1, (player1.gunx1 + step_amt), player1.guny0, player1.guny1, white);
+            player1.x1 += step_amt;
+            player1.gunx1 += step_amt;
             /*erase leftmost column*/
-            fillscr(player.x0, (player.x0 + step_amt), player.y0, player.y1, black);
-            fillscr(player.gunx0, (player.gunx0 + step_amt), player.guny0, player.guny1, black);
-            player.x0 += step_amt;
-            player.gunx0 += step_amt;
-            player.fire_pos += step_amt;
+            fillscr(player1.x0, (player1.x0 + step_amt), player1.y0, player1.y1, black);
+            fillscr(player1.gunx0, (player1.gunx0 + step_amt), player1.guny0, player1.guny1, black);
+            player1.x0 += step_amt;
+            player1.gunx0 += step_amt;
+            player1.fire_pos += step_amt;
         break;
 
         default:
@@ -943,12 +968,14 @@ uint randint(void){
 }
 
 int tick_enemies(int state){
+    if (game.state == halt) return state;
     tick_enemies_c += 1;
-    if (tick_enemies_c > 20){
+    if (tick_enemies_c > 2){
         tick_enemies_c = 0;
         uint rint = randint();
         rint = (rint > enemy_rows - 1) ? enemy_rows  - 1 : rint;
         rows[rint]->shoot_f = 1;
+        // serial_print("Shoot flag set at: "); serial_println(rint); s
     }
 
     
@@ -975,6 +1002,94 @@ int tick_enemies(int state){
         rows[i]->x_shift();
         /* collision */
 
+    }
+    return state;
+}
+
+game_state::game_state(){
+    score = 0;
+    lives = 3;
+    enemy_c = enemy_rows * enemies_per_row;
+}
+
+void game_state::reset(){
+    score = 0;
+    lives = 3;
+    enemy_c = enemy_rows * enemies_per_row;
+    state = live;
+    // const unsigned short enemy_start_y = 5*hitb_y;
+    dir enemy_dir = right;
+
+    renderplayer(105, 280, white, blue);
+    render_lives();
+
+    barriers[0] = mkstruct(15, 45, 236, 260);
+    barriers[1] = mkstruct(75, 105, 236, 260);
+    barriers[2] = mkstruct(135, 165, 236, 260);
+    barriers[3] = mkstruct(195, 225, 236, 260);
+
+    enemy_type type;
+    for (uchar i = 0; i < enemy_rows; i++){
+        switch (i){
+            case 0:
+                type = lvl_1;
+            break;
+            case 1:
+                type = lvl_2;
+            break;
+            default:
+                type = lvl_3;
+            break;
+        }
+        rows[i] = new enemy_row(enemy_start_y + 3*i*hitb_y,type,enemy_dir);
+        enemy_dir = (enemy_dir == right) ? left : right;
+    }
+}
+
+
+void game_state::d_lives(void){
+    lives --;
+    if (lives <= 0){
+        state = halt;
+        fillscr(player1.x0,player1.x0+player_w,player1.y0 - 4,player1.y0+player_h,black);
+    }
+    render_lives();
+}
+
+void game_state::render_lives(void){
+    // clear previously displayed lives
+
+    fillscr(2*hitb_x,4*hitb_x + 3*3*hitb_x, max_y - 2*hitb_y - 4, max_y - hitb_y, black);
+
+    // display current lives
+    for (int i = 0; i < lives; i++){
+        fillscr(2*hitb_x + i*3*hitb_x, 4*hitb_x + i*3*hitb_x, max_y - 2*hitb_y, max_y - hitb_y, white);
+        fillscr(2*hitb_x + 4 + i*3*hitb_x, 2*hitb_x + 8 + i*3*hitb_x, max_y - 2*hitb_y - 2, max_y - 2*hitb_y, white);
+        fillscr(0,max_x, max_y - 3*hitb_y, max_y - 3*hitb_y, white);
+    }
+}
+
+int tick_gamestate(int state){
+    switch(state){
+        case menu:
+
+        break;
+        case live:
+        // check player lives
+            
+        break;
+        case reset:
+            game.reset();
+            state = live;
+        break;
+        case halt:
+            if (tick_halt_c > 10 && game.lives > 0) {
+                tick_halt_c = 0;
+                state = reset;
+                break;
+            } 
+            tick_halt_c += 1;
+        break;
     }
     return state;
 }
