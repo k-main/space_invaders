@@ -20,6 +20,7 @@
 #define cyan 0x07ff
 #define black 0x0000
 #define white 0xffff
+#define gray 0x8410  
 /* dimensions */
 #define min_x 0
 #define min_y 0
@@ -31,13 +32,18 @@
 #define shft_max_y 4
 #define enemies_per_row 11
 #define enemy_start_y 5*hitb_y
-#define enemy_rows 0
+#define enemy_rows 4
 #define row_offst 21
+#define num_lives 3
+#define num_levels 3
+#define enemy_count enemies_per_row * enemy_rows
 
+#define note_t 500
+#define sound_t 10
 
 #define dmg_rad 7
 
-#define NUM_TASKS 6
+#define NUM_TASKS 7
 
 
 //Task struct for concurrent synchSMs implmentations
@@ -68,7 +74,7 @@ void TimerISR() {
 /* state enums */
 
 enum program_state {
-    menu,live,reset,halt
+    menu,live,reset,halt,end
 };
 
 enum lsr_state{
@@ -77,6 +83,14 @@ enum lsr_state{
 
 enum btn_state{
     wait, press
+};
+
+enum tone_state{
+    one,two,three,four,rst
+};
+
+enum sound_type{
+    note,sound
 };
 
 enum dir {up,down,left,right};
@@ -145,16 +159,30 @@ struct static_structure {
 struct game_state {
     uint score;
     uint enemy_c;
+    uint level;
     int lives;
+
     program_state state;
     game_state();
     void reset(void);
-    void i_score(void);
-    void render_score(void);
+    void i_level(void);
+    void render_level(void);
 
+    void d_enemies(void);
+    
     void i_lives(void);
     void d_lives(void);
     void render_lives(void);
+};
+
+struct buzzer_setting {
+    buzzer_setting(uint ICR, uint OCR, sound_type _type);
+    void setvals(uint icr, uint ocr);
+    void play();
+    void set();
+    uint OCR;
+    uint ICR;
+    sound_type type;
 };
 
 uchar mv_l = 0, mv_r = 0, fire_req = 0, fire_ack;
@@ -167,21 +195,30 @@ void setpage(uint start, uint end);
 void fillscr(void);
 void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
 void drawcirc(ushort x, ushort y, ushort r, uint color);
+void drawline(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
+void drawline(ushort x, ushort y, ushort len, uint color);
 void initlcd(void);
 void mklaser(ushort x, ushort y, dir laser_dir, uint color);
 void renderplayer(ushort x, ushort y, uint color, uint laser_color);
 void mvplayer(uchar step_amt, dir direction);
-void drawline(ushort x, ushort y, ushort len, uint color);
 void render_s0_l1(ushort x0, ushort y0, uint color);
 void render_s1_l1(ushort x0, ushort y0, uint color);
 void render_s0_l2(ushort x0, ushort y0, uint color);
 void render_s1_l2(ushort x0, ushort y0, uint color);
 void render_s0_l3(ushort x0, ushort y0, uint color);
 void render_s1_l3(ushort x0, ushort y0, uint color);
-void writechar(ushort x0, ushort y0, char c);
-void writestr(ushort x0, ushort y0, char* str);
+void writechar(ushort x0, ushort y0, char c, uint color);
+void writestr(ushort x0, ushort y0, char* str, uint color);
+void writedig(ushort x0, ushort y0, uchar c);
+void writenum(ushort x0, ushort y0, uchar c);
+void reset_tune(void);
+void start_tune(void);
+void fire_tune(void);
+void fire_tune2(void);
+void msgbox(char* str, uint color);
 uchar setpx(ushort x, ushort y, uint color);
 uint randint(void);
+int abs(int);
 
 int tick_lasers(int state);
 int tick_mv(int state);
@@ -189,9 +226,11 @@ int tick_fire(int state);
 int tick_player(int state);
 int tick_enemies(int state);
 int tick_gamestate(int state);
+int tick_tone(int state);
 
 ushort tick_enemies_c = 0;
 ushort tick_halt_c = 0;
+ushort tone_num = 0;
 
 static_structure mkstruct(ushort x0, ushort x1, ushort y0, ushort y1);
 
@@ -204,11 +243,41 @@ uint shoot_i = 5;
 laser_struct* lasers[LSR_MAX];
 static_structure barriers[4];
 enemy_row* rows[enemy_rows];
+/*
+int tick_tone(int state){
+    switch(state){
+        case one:
+            ICR1 = 4000; 
+            OCR1A = 800;
+            state = rst;
+            tone_num = 1;
+        break;
+        case two:
+            ICR1 = 8000; 
+            OCR1A = 800;
+            state = rst;
+        break;
 
-// MASTER GAMESTATE
-game_state game = game_state();
+        case three:
+            ICR1 = 10000; 
+            OCR1A = 500;
+            state = rst;
+        break;
 
-// uchar barrier_num, hitbox_num;
+        case four:
+            ICR1 = 16000; 
+            OCR1A = 500;
+            state = rst;
+        break;
+*/
+/* sound configuration */
+buzzer_setting fire_tune0(2000,1800,sound), fire_tune1(5000,3000,sound);
+buzzer_setting bgm_tone1(4000,800,note), bgm_tone2(8000,800,note), bgm_tone3(10000,500,note), bgm_tone4(16000,500,note);
+buzzer_setting bzr_off(5000,5000,note);
+buzzer_setting* current_bzr_setting = &bzr_off;
+// buzzer_setting
+game_state game = game_state(); // MASTER GAMESTATE
+
 uchar row_num;
 
 int main(void) {
@@ -216,16 +285,23 @@ int main(void) {
   To initialize a pin as an output, you must set its DDR value as ‘1’ and then set its PORT value as a ‘0’. 
   To initialize a pin as an input, you do the opposite: you must set its DDR value as ‘0’ and its PORT value as a ‘1’.
   */
+    /* initialization */
+    
     ADC_init();
     DDRD = 0b11110000; PORTD = ~0b11110000;
-    DDRB = 0b00101000; PORTB = ~0b00101111;
+    DDRB = 0b00101010; PORTB = ~0b00101111;
+    TCCR1A |= (1 << WGM11) | (1 << COM1A1); //COM1A1 sets it to channel A
+    TCCR1B |= (1 << WGM12) | (1 << WGM13) | (1 << CS11); //CS11 sets the prescaler to be 8
     serial_init(9600);
-    /* initialization */
     initlcd();
-    game.reset();
 
-    // writechar(100,100,'D');
-    writestr(100,100, "PTS");
+    reset_tune();
+    writestr(90,100,"SPACE", white);
+    writestr(90-15,100 + 2*hitb_y, "INVADERS", white);
+    
+    while(ADC_read(2) > 128);
+    fillscr(60,max_x - 60, 100, 100+5*hitb_y,black);
+    game.reset();
 
     tasks[0].period = 100;
     tasks[0].state = live;
@@ -257,93 +333,162 @@ int main(void) {
     tasks[5].elapsedTime = 1;
     tasks[5].TickFct = &tick_enemies;
 
+    tasks[6].period = 500;
+    tasks[6].state = one;
+    tasks[6].elapsedTime = 1;
+    tasks[6].TickFct = &tick_tone;
+
     
     TimerSet(GCD_PERIOD);
     TimerOn();
 
-
     while (1) {
 
     }
-
+    
     return 0;
 }
 
 /* function definitions */
 
-void writechar(ushort x0, ushort y0, char c){
+void writechar(ushort x0, ushort y0, char c, uint color){
     uchar char_width = 6;
     uchar char_height = 12;
+
+
     switch(c){
         case 'A':
-            fillscr(x0, x0, y0, y0 + char_height,white); // left
-            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
-            fillscr(x0,x0 + char_width,y0,y0,white); // top
-            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
-            // fillscr(x0,x0 + 4,y0 + char_height, y0 + char_height, white); // bottom
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            // fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
+        break;
+        case 'W':
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,color); // left
         break;
         case 'B':
 
         break;
+        case 'C':
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
+        break;
         case 'U':
-            fillscr(x0, x0, y0, y0 + char_height,white); // left
-            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
-            // fillscr(x0,x0 + char_width,y0,y0,white); // top
-            // fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
-            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, white); // bottom
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            // fillscr(x0,x0 + char_width,y0,y0,color); // top
+            // fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
         break;
         case 'I':
-            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,white); // left
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,color); // left
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
         break;
         case 'E':
-            fillscr(x0, x0, y0, y0 + char_height,white); // left
-            // fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
-            fillscr(x0,x0 + char_width,y0,y0,white); // top
-            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
-            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, white); // bottom
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            // fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
         break;
         case 'D':
-            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
-            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
-            fillscr(x0,x0 + 4,y0 + char_height, y0 + char_height, white); // bottom
-            fillscr(x0, x0, y0 + char_height/2, y0 + char_height,white); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0,x0 + 4,y0 + char_height, y0 + char_height, color); // bottom
+            fillscr(x0, x0, y0 + char_height/2, y0 + char_height,color); // left
         break;
         case 'H':
-            fillscr(x0, x0, y0, y0 + char_height,white); // left
-            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, white); // right
-            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
         break;
         case 'P':
-            fillscr(x0, x0, y0, y0 + char_height,white); // left
-            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
-            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height/2, white); // right
-            fillscr(x0,x0 + char_width,y0,y0,white); // top
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height/2, color); // right
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+        break;
+        case 'R':
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height/2, color); // right
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            drawline(x0,x0+char_width,y0+char_height/2,y0+char_height,color);
         break;
         case 'T':
-            fillscr(x0,x0 + char_width,y0,y0,white); // top
-            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,white); // left
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,color); // left
+        break;
+        case 'O':
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            // fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
         break;
         case 'S':
-            fillscr(x0,x0 + char_width,y0,y0,white); // top
-            fillscr(x0, x0, y0, y0 + char_height/2,white); // left top
-            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,white); // middle
-            fillscr(x0 + char_width, x0 + char_width, y0 + char_height/2, y0 + char_height, white); // bottom right
-            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, white); // bottom
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0, x0, y0, y0 + char_height/2,color); // left top
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0 + char_width, x0 + char_width, y0 + char_height/2, y0 + char_height, color); // bottom right
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
+        break;
+        case '0':
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            // fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0,x0 + char_width,y0 + char_height, y0 + char_height, color); // bottom
+        break;
+        case '1':
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height,color); // left
+        break;
+        case '2':
+            fillscr(x0,x0 + char_width,y0,y0,color); // top
+            fillscr(x0 + char_width, x0 + char_width, y0, y0+char_height/2, color); // top right
+            fillscr(x0,x0 + char_width,y0 + char_width, y0 + char_width,color); // middle
+            fillscr(x0, x0, y0 + char_height/2, y0 + char_height,color); // bottom left
+        break;
+        case 'N':
+            fillscr(x0, x0, y0, y0 + char_height,color); // left
+            fillscr(x0 + char_width, x0 + char_width, y0, y0 + char_height, color); // right
+            drawline(x0,x0+char_width,y0,y0+char_height,color);
+        break;
+        case 'V':
+            drawline(x0,x0+char_width/3,y0,y0+char_height,color);
+            drawline(x0+char_width/3,x0+char_width,y0+char_height,y0,white);
+        break;
+        case '!':
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0, y0 + char_height-4,color); // left
+            fillscr(x0 + char_width/2, x0 + char_width/2, y0 + char_height -2, y0 + char_height,color); // left
         break;
     } 
 }
 
-void writestr(ushort x0, ushort y0, char* str){
+void writestr(ushort x0, ushort y0, char* str, uint color){
     ushort char_num = 0;
     ushort start = x0;
     // char c = ' ';
     while(str[char_num] != '\0'){
         // serial_println(str[char_num]);
-        if (str[char_num] != ' ') writechar(start, y0, str[char_num]);
+        if (str[char_num] != ' ') writechar(start, y0, str[char_num], color);
         start += 10;
         char_num += 1;
 
     }
+}
+
+void msgbox(char* str, uint color){
+    fillscr(60,max_x - 50, 110, 150, gray);  
+    fillscr(50,max_x - 60, 100, 140, white);
+    writestr(80,110,str,color);
+    // writestr(s)
 }
 
 void sendcmd(uchar index)
@@ -465,6 +610,7 @@ void initlcd(void)
 
 int tick_lasers(int state){
     // update laser positions
+    // if (game.state == halt) return state;
     for (uchar i = 0; i < LSR_CNT; i++){
         if (lasers[i]->dead != 1){ //laser is not dead
             lasers[i]->mvlaser();
@@ -487,7 +633,13 @@ uchar setpx(ushort x, ushort y, uint color){
 void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     y = (y + 10 > max_y) ? max_y - 10 : y;
     laser_struct* laser = new laser_struct;
-
+    if (laser_dir == up) {
+        // fire_tune();
+        fire_tune0.play();
+    } else {
+        // fire_tune2();
+        fire_tune1.play();
+    }
     laser->ldir = laser_dir;
     laser->y0 = y;
     laser->y1 = y + 10;
@@ -568,6 +720,7 @@ uchar laser_struct::collision(){
                         rows[i]->set_rmost();
                     }
                     rows[i]->hp = rows[i]->hp - 1;
+                    game.d_enemies();
                     return 0;
                 }
             }
@@ -776,6 +929,31 @@ void drawcirc(ushort x0, ushort y0, ushort r, uint color)
         if (e2 > x) err += ++x*2+1;
     } while (x <= 0);
 
+}
+
+int abs(int x){
+    x = (x < 0) ? -x : x;
+    return x;
+}
+
+void drawline(ushort x0, ushort x1, ushort y0, ushort y1, uint color){
+    short y = y1-y0;
+    short x = x1-x0;
+    short dx = abs(x), sx = x0<x1 ? 1 : -1;
+    short dy = -abs(y), sy = y0<y1 ? 1 : -1;
+    short err = dx+dy, e2;                                                /* error value e_xy             */
+    while (1){                                                           /* loop                         */
+        setpx(x0,y0,color);
+        e2 = 2*err;
+        if (e2 >= dy) {                                                 /* e_xy+e_x > 0                 */
+            if (x0 == x1) break;
+            err += dy; x0 += sx;
+        }
+        if (e2 <= dx) {                                                 /* e_xy+e_y < 0                 */
+            if (y0 == y1) break;
+            err += dx; y0 += sy;
+        }
+    }
 }
 
 void laser_struct::erase(void){
@@ -1043,14 +1221,15 @@ uchar enemy_row::y_shift(void){
 
 uint randint(void){
     uchar randint = (ADC_read(4) - 950) * (ADC_read(3) - 950);
-    randint = map_value(0,256,0,4,randint);
+    randint = map_value(0,256,0,enemy_rows,randint);
     return randint;
 }
+
 
 int tick_enemies(int state){
     if (game.state == halt) return state;
     tick_enemies_c += 1;
-    if (tick_enemies_c > 2){
+    if (tick_enemies_c > 20){
         tick_enemies_c = 0;
         uint rint = randint();
         rint = (rint > enemy_rows - 1) ? enemy_rows  - 1 : rint;
@@ -1080,7 +1259,6 @@ int tick_enemies(int state){
             }
         }
         rows[i]->x_shift();
-        /* collision */
 
     }
     return state;
@@ -1088,18 +1266,61 @@ int tick_enemies(int state){
 
 game_state::game_state(){
     score = 0;
-    lives = 3;
+    lives = num_lives;
+    level = 0;
     enemy_c = enemy_rows * enemies_per_row;
 }
 
+void game_state::d_enemies(){
+    enemy_c -= 1;
+    serial_println(enemy_c);
+    if (enemy_c <= 0){
+        state = halt;
+        reset_tune();
+        msgbox("U WON!", black);
+    }
+}
+
+void reset_tune(void){
+    ICR1 = 10000; //20ms pwm period
+    OCR1A = 1000;
+    _delay_ms(200);
+    OCR1A = 6000;
+    _delay_ms(100);
+    OCR1A = 10000;
+}
+
+void start_tune(void){
+    ICR1 = 2000; 
+    OCR1A = 1600;
+    _delay_ms(200);
+    OCR1A = 2000;
+}
+
+void fire_tune(void){
+    ICR1 = 2000; 
+    OCR1A = 1800;
+    _delay_ms(10);
+    OCR1A = 2000;
+}
+
+void fire_tune2(void){
+    ICR1 = 5000; 
+    OCR1A = 3000;
+    _delay_ms(10);
+    OCR1A = 5000;
+}
+
 void game_state::reset(){
+    start_tune();
     score = 0;
-    lives = 3;
-    enemy_c = enemy_rows * enemies_per_row;
+    lives = num_lives;
+    level = 0;
+    enemy_c = enemy_count;
     state = live;
     // const unsigned short enemy_start_y = 5*hitb_y;
     dir enemy_dir = right;
-
+    fillscr(0,max_x,280,280+player_h,black);
     renderplayer(105, 280, white, blue);
     render_lives();
 
@@ -1132,15 +1353,28 @@ void game_state::d_lives(void){
     if (lives <= 0){
         state = halt;
         fillscr(player1.x0,player1.x0+player_w,player1.y0 - 4,player1.y0+player_h,black);
+        msgbox("U DIED", red);
+        ICR1 = 16000; 
+        OCR1A = 500;
+        _delay_ms(200);
+        OCR1A = 16000;
     }
     render_lives();
+}
+
+void game_state::i_lives(void){
+    if (lives < 3) {
+        lives ++;
+        fillscr(player1.x0,player1.x0+player_w,player1.y0 - 4,player1.y0+player_h,black);
+        render_lives();
+    }
 }
 
 void game_state::render_lives(void){
     // clear previously displayed lives
 
     fillscr(6*hitb_x,8*hitb_x + 3*3*hitb_x, max_y - 2*hitb_y - 4, max_y - hitb_y, black);
-    writestr(hitb_x, max_y -2*hitb_y, "HP ");
+    writestr(hitb_x, max_y -2*hitb_y, "HP ", white);
     // display current lives
     for (int i = 0; i < lives; i++){
         fillscr(6*hitb_x + i*3*hitb_x, 8*hitb_x + i*3*hitb_x, max_y - 2*hitb_y, max_y - hitb_y, white);
@@ -1149,26 +1383,127 @@ void game_state::render_lives(void){
     }
 }
 
+
 int tick_gamestate(int state){
     switch(state){
         case menu:
 
         break;
         case live:
-        // check player lives
-            
+            if (game.state == halt){
+                state = halt;
+            }
         break;
         case reset:
             game.reset();
             state = live;
         break;
         case halt:
-            if (tick_halt_c > 10 && game.lives > 0) {
+            if (ADC_read(2) < 128){
+                for (uchar i = 0; i < enemy_rows; i++){
+                    delete rows[i];
+                }
+                fillscr(0,max_x,2*hitb_y,280,black);
                 tick_halt_c = 0;
+                game.state = live;
                 state = reset;
                 break;
-            } 
-            tick_halt_c += 1;
+            }
+        break;
+    }
+    return state;
+}
+
+buzzer_setting::buzzer_setting(uint icr, uint ocr, sound_type _type){
+    ICR = icr;
+    OCR = ocr;
+    type = _type;
+}
+
+void buzzer_setting::setvals(uint icr, uint ocr){
+    ICR = icr;
+    OCR = ocr;
+}
+
+void buzzer_setting::set(void){
+    ICR1 = ICR;
+    OCR1A = OCR;
+}
+
+void buzzer_setting::play(void){
+    uint icr_t = current_bzr_setting->ICR;
+    uint ocr_t = current_bzr_setting->OCR;
+    ICR1 = ICR; 
+    OCR1A = OCR;
+    switch(type){
+        case sound:
+            _delay_ms(sound_t);
+        break;
+        case note:
+            _delay_ms(note_t);
+        break;
+    }
+    ICR1 = icr_t;
+    OCR1A = ocr_t;
+}
+
+int tick_tone(int state){
+    switch(state){
+        case one:
+            // ICR1 = 4000; 
+            // OCR1A = 800;
+            bgm_tone1.set();
+            current_bzr_setting = &bgm_tone1;
+            state = rst;
+            tone_num = 1;
+        break;
+        case two:
+            // ICR1 = 8000; 
+            // OCR1A = 800;
+            bgm_tone2.set();
+            current_bzr_setting = &bgm_tone2;
+            state = rst;
+        break;
+
+        case three:
+            // ICR1 = 10000; 
+            // OCR1A = 500;
+            bgm_tone3.set();
+            current_bzr_setting = &bgm_tone3;
+            state = rst;
+        break;
+
+        case four:
+            // ICR1 = 16000; 
+            // OCR1A = 500;
+            bgm_tone4.set();
+            current_bzr_setting = &bgm_tone4;
+            state = rst;
+        break;
+        case rst:
+            ICR1 = 5000;
+            OCR1A = 5000;
+            current_bzr_setting = &bzr_off;
+            if(game.lives <= 0) break;
+            switch(tone_num){
+                case 4:
+                tone_num = 0;
+                state = one;
+                break;
+                case 3:
+                tone_num = 4;
+                state = four;
+                break;
+                case 2:
+                tone_num = 3;
+                state = three;
+                break;
+                case 1:
+                tone_num = 2;
+                state = two;
+                break;
+            }
+            // state = one;
         break;
     }
     return state;
