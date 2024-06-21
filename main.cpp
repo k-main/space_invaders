@@ -2,7 +2,7 @@
 #include "timerISR.h"
 #include "serialATmega.h"
 #include "periph.h"
-#include "helper.h"
+#include "lcd.h"
 /* work smarter */
 #define uchar unsigned char
 #define ushort unsigned short
@@ -161,10 +161,13 @@ struct game_state {
     uint enemy_c;
     uint level;
     int lives;
+    uchar diff_coef;
+
 
     program_state state;
     game_state();
     void reset(void);
+    void stage_advance(void);
     void i_level(void);
     void render_level(void);
 
@@ -185,19 +188,14 @@ struct buzzer_setting {
     sound_type type;
 };
 
+unsigned int map_value(unsigned int aFirst, unsigned int aSecond, unsigned int bFirst, unsigned int bSecond, unsigned int inVal)
+{
+	return bFirst + (long((inVal - aFirst))*long((bSecond-bFirst)))/(aSecond - aFirst);
+}
+
+
 uchar mv_l = 0, mv_r = 0, fire_req = 0, fire_ack;
 
-void sendcmd(uchar index);
-void write(uchar data);
-void senddata(uint data);
-void setcol(uint start, uint end);
-void setpage(uint start, uint end);
-void fillscr(void);
-void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
-void drawcirc(ushort x, ushort y, ushort r, uint color);
-void drawline(ushort x0, ushort x1, ushort y0, ushort y1, uint color);
-void drawline(ushort x, ushort y, ushort len, uint color);
-void initlcd(void);
 void mklaser(ushort x, ushort y, dir laser_dir, uint color);
 void renderplayer(ushort x, ushort y, uint color, uint laser_color);
 void mvplayer(uchar step_amt, dir direction);
@@ -213,12 +211,10 @@ void writedig(ushort x0, ushort y0, uchar c);
 void writenum(ushort x0, ushort y0, uchar c);
 void reset_tune(void);
 void start_tune(void);
-void fire_tune(void);
-void fire_tune2(void);
 void msgbox(char* str, uint color);
-uchar setpx(ushort x, ushort y, uint color);
+// uchar setpx(ushort x, ushort y, uint color);
 uint randint(void);
-int abs(int);
+// int abs(int);
 
 int tick_lasers(int state);
 int tick_mv(int state);
@@ -243,33 +239,6 @@ uint shoot_i = 5;
 laser_struct* lasers[LSR_MAX];
 static_structure barriers[4];
 enemy_row* rows[enemy_rows];
-/*
-int tick_tone(int state){
-    switch(state){
-        case one:
-            ICR1 = 4000; 
-            OCR1A = 800;
-            state = rst;
-            tone_num = 1;
-        break;
-        case two:
-            ICR1 = 8000; 
-            OCR1A = 800;
-            state = rst;
-        break;
-
-        case three:
-            ICR1 = 10000; 
-            OCR1A = 500;
-            state = rst;
-        break;
-
-        case four:
-            ICR1 = 16000; 
-            OCR1A = 500;
-            state = rst;
-        break;
-*/
 /* sound configuration */
 buzzer_setting fire_tune0(2000,1800,sound), fire_tune1(5000,3000,sound);
 buzzer_setting bgm_tone1(4000,800,note), bgm_tone2(8000,800,note), bgm_tone3(10000,500,note), bgm_tone4(16000,500,note);
@@ -491,66 +460,6 @@ void msgbox(char* str, uint color){
     // writestr(s)
 }
 
-void sendcmd(uchar index)
-{
-    PORTD &= ~0x40; // DC LOW;
-    PORTD &= ~0x20; // CS LOW;
-    SPI_SEND(index);
-    PORTD |=  0x20; // CS HIGH;
-}
-
-void write(uchar data)
-{
-    PORTD |= 0x40; // DC HIGH;
-    PORTD &= ~0x20; // CS LOW;
-    SPI_SEND(data);
-    PORTD |=  0x20; // CS HIGH;
-}
-
-void senddata(uint data)
-{
-    uchar data1 = data>>8;
-    uchar data2 = data&0xff;
-    PORTD |= 0x40; // DC HIGH;
-    PORTD &= ~0x20; // CS LOW;
-    SPI_SEND(data1);
-    SPI_SEND(data2);
-    PORTD |=  0x20; // CS HIGH;
-}
-
-void setcol(uint start,uint end)
-{
-    sendcmd(0x2A);
-    senddata(start);
-    senddata(end);
-}
-
-void setpage(uint start,uint end)
-{
-    sendcmd(0x2B);                                    
-    senddata(start);
-    senddata(end);
-}
-
-void fillscr(void)
-{
-    setcol(0, 239);
-    setpage(0, 319);
-    sendcmd(0x2c);                                                  
-                                                                      
-
-    PORTD |= 0x40; // DC HIGH;
-    PORTD &= ~0x20; // CS LOW;
-    for(uint i=0; i<38400; i++)
-    {
-        SPI_SEND(0);
-        SPI_SEND(0);
-        SPI_SEND(0);
-        SPI_SEND(0);
-    }
-    PORTD |=  0x20; // CS HIGH;
-}
-
 void initlcd(void)
 {
     SPI_INIT();
@@ -634,10 +543,8 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     y = (y + 10 > max_y) ? max_y - 10 : y;
     laser_struct* laser = new laser_struct;
     if (laser_dir == up) {
-        // fire_tune();
         fire_tune0.play();
     } else {
-        // fire_tune2();
         fire_tune1.play();
     }
     laser->ldir = laser_dir;
@@ -647,6 +554,7 @@ void mklaser(ushort x, ushort y, dir laser_dir, uint color){
     laser->color = color;
     laser->dead = 0;
     laser->pending_coll = 0;
+
     for (int i = 0; i < 4; i++){
         if (x >= barriers[i].x0 && x <= barriers[i].x1){
             laser->pending_coll = 1;
@@ -763,24 +671,6 @@ void laser_struct::mvlaser(){
     if (leadingpx % 8 == 0) collision();
 }
 
-void fillscr(ushort x0, ushort x1, ushort y0, ushort y1, uint color){
-    setcol(x0, x1);
-    setpage(y0, y1);
-    sendcmd(0x2C);
-
-    PORTD |= 0x40; // DC HIGH;
-    PORTD &= ~0x20; // CS LOW;
-
-    uint area = (x1 - x0 + 1) * (y1 - y0 + 1);
-    uchar colorh = color >> 8;
-    uchar colorl = color & 0xFF;
-    for (uint i = 0; i < area; i++) {
-        SPI_SEND(colorh);
-        SPI_SEND(colorl);
-    }
-    PORTD |=  0x20; // CS HIGH;
-    
-}
 
 int tick_mv(int state){
     if (game.state == halt) return state;
@@ -835,8 +725,7 @@ int tick_player(int state){
     if (fire_req == 1){
         fire_ack = 1;
         mklaser(player1.fire_pos, player1.y0 - 14, up, player1.laser_color);
-        // serial_print("Laser at : ");
-        // serial_println(player1.fire_pos);
+
     } else {
         fire_ack = 0;
     }
@@ -903,56 +792,6 @@ void mvplayer(uchar step_amt, dir direction){
         default:
         /*you're not supposed to be in here*/
         break;
-    }
-}
-
-void drawline(ushort x0, ushort y0, ushort len, uint color){
-    setcol(x0,x0);
-    setpage(y0,y0 + len);
-    sendcmd(0x2C);
-    for(int i = 0; i < len; i++) senddata(color);
-}
-
-void drawcirc(ushort x0, ushort y0, ushort r, uint color)
-{
-    int x = -r, y = 0, err = 2-2*r, e2;
-    do {
-
-        drawline(x0-x, y0-y, 2*y, color);
-        drawline(x0+x, y0-y, 2*y, color);
-
-        e2 = err;
-        if (e2 <= y) {
-            err += ++y*2+1;
-            if (-x == y && e2 <= x) e2 = 0;
-        }
-        if (e2 > x) err += ++x*2+1;
-    } while (x <= 0);
-
-}
-
-int abs(int x){
-    x = (x < 0) ? -x : x;
-    return x;
-}
-
-void drawline(ushort x0, ushort x1, ushort y0, ushort y1, uint color){
-    short y = y1-y0;
-    short x = x1-x0;
-    short dx = abs(x), sx = x0<x1 ? 1 : -1;
-    short dy = -abs(y), sy = y0<y1 ? 1 : -1;
-    short err = dx+dy, e2;                                                /* error value e_xy             */
-    while (1){                                                           /* loop                         */
-        setpx(x0,y0,color);
-        e2 = 2*err;
-        if (e2 >= dy) {                                                 /* e_xy+e_x > 0                 */
-            if (x0 == x1) break;
-            err += dy; x0 += sx;
-        }
-        if (e2 <= dx) {                                                 /* e_xy+e_y < 0                 */
-            if (y0 == y1) break;
-            err += dx; y0 += sy;
-        }
     }
 }
 
@@ -1229,12 +1068,11 @@ uint randint(void){
 int tick_enemies(int state){
     if (game.state == halt) return state;
     tick_enemies_c += 1;
-    if (tick_enemies_c > 20){
+    if (tick_enemies_c > game.diff_coef){
         tick_enemies_c = 0;
         uint rint = randint();
         rint = (rint > enemy_rows - 1) ? enemy_rows  - 1 : rint;
         rows[rint]->shoot_f = 1;
-        // serial_print("Shoot flag set at: "); serial_println(rint); s
     }
 
     
@@ -1268,6 +1106,7 @@ game_state::game_state(){
     score = 0;
     lives = num_lives;
     level = 0;
+    diff_coef = 20;
     enemy_c = enemy_rows * enemies_per_row;
 }
 
@@ -1297,21 +1136,7 @@ void start_tune(void){
     OCR1A = 2000;
 }
 
-void fire_tune(void){
-    ICR1 = 2000; 
-    OCR1A = 1800;
-    _delay_ms(10);
-    OCR1A = 2000;
-}
-
-void fire_tune2(void){
-    ICR1 = 5000; 
-    OCR1A = 3000;
-    _delay_ms(10);
-    OCR1A = 5000;
-}
-
-void game_state::reset(){
+void game_state::reset(void){
     start_tune();
     score = 0;
     lives = num_lives;
@@ -1347,6 +1172,10 @@ void game_state::reset(){
     }
 }
 
+void game_state::stage_advance(void){
+    diff_coef = (diff_coef > 2) ? diff_coef - 2 : diff_coef;
+
+}
 
 void game_state::d_lives(void){
     lives --;
@@ -1373,7 +1202,7 @@ void game_state::i_lives(void){
 void game_state::render_lives(void){
     // clear previously displayed lives
 
-    fillscr(6*hitb_x,8*hitb_x + 3*3*hitb_x, max_y - 2*hitb_y - 4, max_y - hitb_y, black);
+    fillscr(6*hitb_x,max_x, max_y - 2*hitb_y - 4, max_y - hitb_y, black);
     writestr(hitb_x, max_y -2*hitb_y, "HP ", white);
     // display current lives
     for (int i = 0; i < lives; i++){
@@ -1382,7 +1211,6 @@ void game_state::render_lives(void){
         fillscr(0,max_x, max_y - 3*hitb_y, max_y - 3*hitb_y, white);
     }
 }
-
 
 int tick_gamestate(int state){
     switch(state){
@@ -1450,32 +1278,24 @@ void buzzer_setting::play(void){
 int tick_tone(int state){
     switch(state){
         case one:
-            // ICR1 = 4000; 
-            // OCR1A = 800;
             bgm_tone1.set();
             current_bzr_setting = &bgm_tone1;
             state = rst;
             tone_num = 1;
         break;
         case two:
-            // ICR1 = 8000; 
-            // OCR1A = 800;
             bgm_tone2.set();
             current_bzr_setting = &bgm_tone2;
             state = rst;
         break;
 
         case three:
-            // ICR1 = 10000; 
-            // OCR1A = 500;
             bgm_tone3.set();
             current_bzr_setting = &bgm_tone3;
             state = rst;
         break;
 
         case four:
-            // ICR1 = 16000; 
-            // OCR1A = 500;
             bgm_tone4.set();
             current_bzr_setting = &bgm_tone4;
             state = rst;
@@ -1503,7 +1323,6 @@ int tick_tone(int state){
                 state = two;
                 break;
             }
-            // state = one;
         break;
     }
     return state;
