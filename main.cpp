@@ -104,6 +104,7 @@ struct laser_struct{
     void erase(void);
     void mvlaser(void);
     uchar collision(void);
+    laser_struct::laser_struct(ushort x, ushort y, dir direction, uint color);
 };
 
 struct entity {
@@ -539,44 +540,44 @@ uchar setpx(ushort x, ushort y, uint color){
     return 1;
 }
 
-void mklaser(ushort x, ushort y, dir laser_dir, uint color){
+laser_struct::laser_struct(ushort x, ushort y, dir laser_dir, uint c){
     y = (y + 10 > max_y) ? max_y - 10 : y;
-    laser_struct* laser = new laser_struct;
-    if (laser_dir == up) {
-        fire_tune0.play();
-    } else {
-        fire_tune1.play();
-    }
-    laser->ldir = laser_dir;
-    laser->y0 = y;
-    laser->y1 = y + 10;
-    laser->x0 = x;
-    laser->color = color;
-    laser->dead = 0;
-    laser->pending_coll = 0;
+
+    (laser_dir == up) ? fire_tune0.play() : fire_tune1.play();
+    ldir = laser_dir;
+    y0 = y;
+    y1 = y + 10;
+    x0 = x;
+    color = c;
+    dead = 0;
+    pending_coll = 0;
 
     for (int i = 0; i < 4; i++){
         if (x >= barriers[i].x0 && x <= barriers[i].x1){
-            laser->pending_coll = 1;
-            laser->barrier_num = (map_value(0,barriers[3].x1 +15,0,4,x));
-            laser->hitbox_num = (map_value(barriers[laser->barrier_num].x0,barriers[laser->barrier_num].x1,0,5,x));
+            pending_coll = 1;
+            barrier_num = (map_value(0,barriers[3].x1 +15,0,4,x));
+            hitbox_num = (map_value(barriers[barrier_num].x0,barriers[barrier_num].x1,0,5,x));
             continue;
         }
     }
 
-    for (ushort i = laser->y0; i <= laser->y1; i++){
+    for (ushort i = y; i <= y + 10; i++){
         setpx(x, i, color);
     }
 
+}
+
+void mklaser(ushort x, ushort y, dir laser_dir, uint color){
+
     for (uchar i = 0; i <= LSR_CNT; i++){
         if (lasers[i] == nullptr) {
-            lasers[i] = laser;
+            lasers[i] = new laser_struct(x,y,laser_dir,color);
             if (LSR_CNT < LSR_MAX) LSR_CNT+= 1;
             break;
         }
         if (lasers[i]->dead == 1){
             delete lasers[i];
-            lasers[i] = laser;
+            lasers[i] = new laser_struct(x,y,laser_dir,color);;
             if (LSR_CNT < LSR_MAX) LSR_CNT+= 1;
             break;
         }
@@ -1146,6 +1147,7 @@ void game_state::reset(void){
     // const unsigned short enemy_start_y = 5*hitb_y;
     dir enemy_dir = right;
     fillscr(0,max_x,280,280+player_h,black);
+    _delay_ms(200);
     renderplayer(105, 280, white, blue);
     render_lives();
 
@@ -1228,9 +1230,9 @@ int tick_gamestate(int state){
         break;
         case halt:
             if (ADC_read(2) < 128){
-                for (uchar i = 0; i < enemy_rows; i++){
-                    delete rows[i];
-                }
+                for (uchar i = 0; i < enemy_rows; i++) if (rows[i] != nullptr) delete rows[i];
+                for (uchar i = 0; i < LSR_MAX; i++) if (lasers[i] != nullptr) delete lasers[i];
+                
                 fillscr(0,max_x,2*hitb_y,280,black);
                 tick_halt_c = 0;
                 game.state = live;
